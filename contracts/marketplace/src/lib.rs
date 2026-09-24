@@ -606,6 +606,44 @@ impl MarketplaceContract {
         Ok(())
     }
 
+    /// Deactivate any active listing for `bot_id`. Permissioned to `bot_nft` contract.
+    pub fn on_bot_moved(env: Env, bot_id: u64) -> Result<(), MarketplaceError> {
+        let config: Config = env
+            .storage()
+            .instance()
+            .get(&DataKey::Config)
+            .ok_or(MarketplaceError::NotInitialized)?;
+        config.bot_nft.require_auth();
+
+        let active: Vec<u64> = env
+            .storage()
+            .instance()
+            .get(&DataKey::ActiveListings)
+            .unwrap_or_else(|| Vec::new(&env));
+
+        for listing_id in active.iter() {
+            if let Some(mut listing) = env
+                .storage()
+                .persistent()
+                .get::<_, Listing>(&DataKey::Listing(listing_id))
+            {
+                if listing.bot_id == bot_id && listing.active {
+                    listing.active = false;
+                    env.storage()
+                        .persistent()
+                        .set(&DataKey::Listing(listing_id), &listing);
+                    Self::remove_active_listing(&env, listing_id);
+                    Self::decrement_user_active_listing_count(&env, &listing.seller);
+                    env.events().publish(
+                        (symbol_short!("deactive"), bot_id),
+                        listing_id,
+                    );
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Retrieve a listing by ID. Historical listings (bought/cancelled/stale)
     /// remain readable with `active == false`; only an ID that was never
     /// assigned returns `ListingNotFound`. This is intentional (see module
@@ -885,11 +923,10 @@ impl MarketplaceContract {
 
     fn probe_bot_nft(env: &Env, bot_nft: &Address) -> Result<(), MarketplaceError> {
         let bot_client = BotNFTContractClient::new(env, bot_nft);
-        bot_client
-            .try_get_bot(&1)
-            .ok()
-            .ok_or(MarketplaceError::InvalidBotNft)?;
-        Ok(())
+        match bot_client.try_admin() {
+            Ok(Ok(_)) => Ok(()),
+            _ => Err(MarketplaceError::InvalidBotNft),
+        }
     }
 
     fn decrement_user_active_listing_count(env: &Env, seller: &Address) {
@@ -905,16 +942,16 @@ impl MarketplaceContract {
                 env.storage()
                     .persistent()
                     .set(&DataKey::UserActiveListingCount(seller.clone()), &new_count);
+                env.storage().persistent().extend_ttl(
+                    &DataKey::UserActiveListingCount(seller.clone()),
+                    LEDGER_THRESHOLD,
+                    LEDGER_BUMP,
+                );
             } else {
                 env.storage()
                     .persistent()
                     .remove(&DataKey::UserActiveListingCount(seller.clone()));
             }
-            env.storage().persistent().extend_ttl(
-                &DataKey::UserActiveListingCount(seller.clone()),
-                LEDGER_THRESHOLD,
-                LEDGER_BUMP,
-            );
         }
     }
 }

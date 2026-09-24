@@ -258,12 +258,14 @@ describe("getAccrualState", () => {
   it("parses raw accrual state correctly", async () => {
     mockSimulate.mockResolvedValue({
       last_claim_ts: 1_700_000_000n,
-      total_claimed_points: 42n,
+      carry_points: 42n,
+      lifetime_points: 250n,
     });
     const state = await getAccrualState("GUSER");
     expect(state).toEqual({
       last_claim_ts: 1_700_000_000n,
-      total_claimed_points: 42n,
+      carry_points: 42n,
+      lifetime_points: 250n,
     });
   });
 

@@ -75,7 +75,8 @@ export const BOT_TIER_BG_COLORS: Record<BotTier, string> = {
 };
 export interface AccrualState {
   last_claim_ts: bigint;
-  total_claimed_points: bigint;
+  carry_points: bigint;
+  lifetime_points: bigint;
 }
 
 /**

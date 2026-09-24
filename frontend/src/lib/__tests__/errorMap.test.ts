@@ -41,6 +41,9 @@ describe("classifyError (AM-035)", () => {
       new Error("Error(Contract, #3) InvalidPrice"),
       new Error("Error(Contract, #6) Unauthorized"),
       new Error("ListingNotFound in marketplace storage"),
+      new Error("Error(Contract, #6) RegistryCallFailed"),
+      new Error("Error(Contract, #7) TokenMintFailed"),
+      new Error("Error(Contract, #14) ListingStale"),
     ];
 
     for (const err of errors) {

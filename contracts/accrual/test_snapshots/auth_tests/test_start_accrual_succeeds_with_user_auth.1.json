@@ -145,7 +145,23 @@
                   "map": [
                     {
                       "key": {
+                        "symbol": "carry_points"
+                      },
+                      "val": {
+                        "u64": 0
+                      }
+                    },
+                    {
+                      "key": {
                         "symbol": "last_claim_ts"
+                      },
+                      "val": {
+                        "u64": 0
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "lifetime_points"
                       },
                       "val": {
                         "u64": 0
@@ -162,14 +178,6 @@
                     {
                       "key": {
                         "symbol": "started_at"
-                      },
-                      "val": {
-                        "u64": 0
-                      }
-                    },
-                    {
-                      "key": {
-                        "symbol": "total_claimed_points"
                       },
                       "val": {
                         "u64": 0

@@ -1420,7 +1420,8 @@ fn test_e2e_five_contract_full_flow() {
     let alice_state = accrual
         .get_accrual_state(&alice)
         .expect("alice accrual state");
-    assert_eq!(alice_state.total_claimed_points, 0);
+    assert_eq!(alice_state.carry_points, 0);
+    assert_eq!(alice_state.lifetime_points, 0);
     // last_claim_ts should equal current ledger timestamp at start.
     assert_eq!(alice_state.last_claim_ts, env.ledger().timestamp());
     let bob_state = accrual.get_accrual_state(&bob).expect("bob accrual state");
@@ -1479,14 +1480,10 @@ fn test_e2e_five_contract_full_flow() {
     let bob_profile = registry.get_user(&bob);
     assert_eq!(bob_profile.total_points, 3600);
     assert_eq!(bob_profile.claimed_amt, 36);
-    // Accrual state carry is 0 because 3600 %100==0.
-    assert_eq!(
-        accrual
-            .get_accrual_state(&alice)
-            .unwrap()
-            .total_claimed_points,
-        0
-    );
+    // Accrual state carry is 0 because 3600 %100==0, lifetime is 3600.
+    let final_alice_state = accrual.get_accrual_state(&alice).unwrap();
+    assert_eq!(final_alice_state.carry_points, 0);
+    assert_eq!(final_alice_state.lifetime_points, 3600);
 
     // 5. Mint a Gold bot for Alice via admin_mint (no payment, deterministic rarity).
     let alice_rate_before_gold = bot.get_user_total_rate(&alice);
@@ -1691,12 +1688,14 @@ fn test_bot_nft_getter() {
 #[test]
 fn test_per_seller_listing_limit() {
     let h = setup();
+    h.env.budget().reset_unlimited();
     let seller = Address::generate(&h.env);
     let cap = h.mkt.get_listing_cap();
     assert_eq!(cap, 50, "default cap should be 50");
 
     for i in 0..cap {
-        let bot_id = h.bot.mint_basic(&seller);
+        let tier = if i < 25 { BotTier::Basic } else { BotTier::Bronze };
+        let bot_id = h.bot.admin_mint(&seller, &tier);
         let result = h.mkt.try_list_bot(
             &seller,
             &bot_id,
@@ -1710,7 +1709,7 @@ fn test_per_seller_listing_limit() {
         );
     }
 
-    let bot_id = h.bot.mint_basic(&seller);
+    let bot_id = h.bot.admin_mint(&seller, &BotTier::Silver);
     let result = h.mkt.try_list_bot(
         &seller,
         &bot_id,
@@ -1816,4 +1815,44 @@ fn test_admin_can_adjust_listing_cap() {
         Err(Ok(MarketplaceError::TooManyListings)),
         "11th listing should exceed new cap of 10"
     );
+}
+
+#[test]
+fn test_transfer_listed_bot_deactivates_listing() {
+    let h = setup();
+    h.env.mock_all_auths();
+    let seller = Address::generate(&h.env);
+    let buyer = Address::generate(&h.env);
+    let recipient = Address::generate(&h.env);
+    let bot_id = h.bot.mint_basic(&seller);
+
+    h.bot.set_marketplace(&h.mkt.address);
+    let listing_id = h.mkt.list_bot(&seller, &bot_id, &50_0000000_i128, &h.token.address);
+
+    // Transferring the listed bot to recipient notifies on_bot_moved
+    h.bot.transfer(&bot_id, &h.mkt.address, &recipient);
+
+    let listing = h.mkt.get_listing(&listing_id);
+    assert!(!listing.active);
+
+    h.token.mint(&buyer, &100_0000000_i128);
+    let result = h.mkt.try_buy_bot(&buyer, &listing_id);
+    assert_eq!(result, Err(Ok(MarketplaceError::ListingNotActive)));
+}
+
+#[test]
+fn test_marketplace_outage_does_not_block_transfer() {
+    let h = setup();
+    let seller = Address::generate(&h.env);
+    let recipient = Address::generate(&h.env);
+    let bot_id = h.bot.mint_basic(&seller);
+
+    // Set marketplace to a non-contract or uninitialized address
+    let bad_mkt = Address::generate(&h.env);
+    h.bot.set_marketplace(&bad_mkt);
+
+    // Transfer must succeed cleanly despite marketplace outage
+    let result = h.bot.try_transfer(&bot_id, &seller, &recipient);
+    assert!(result.is_ok());
+    assert_eq!(h.bot.get_bot(&bot_id).owner, recipient);
 }
