@@ -1,0 +1,72 @@
+name: Mutation testing (cargo-mutants)
+
+# Issue #545: mutation testing to catch assertions that would pass even if
+# the underlying contract logic were broken (e.g. `assert!(result.is_err())`
+# instead of asserting the specific error variant). This runs on a weekly
+# schedule rather than per-PR because cargo-mutants rebuilds and re-tests
+# the crate under test once per mutant, which is far too slow for a PR gate
+# on a Rust/Soroban workspace.
+#
+# Known limitation: contracts/marketplace currently has a pre-existing test
+# compile error (contracts/marketplace/src/test.rs uses a private
+# soroban-sdk associated function) unrelated to this workflow, so it is
+# excluded from the package list below until that's fixed in a separate
+# PR/issue. Once fixed, add `-p automint-marketplace` back to the mutants
+# invocation.
+on:
+  schedule:
+    # Every Monday at 06:00 UTC.
+    - cron: "0 6 * * 1"
+  workflow_dispatch: {}
+
+jobs:
+  mutants:
+    name: cargo-mutants (registry, bot_nft, token, accrual)
+    runs-on: ubuntu-latest
+    # cargo-mutants builds and tests the crate once per surviving mutant;
+    # give it real time to work with on the scheduled run.
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry and build artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-mutants-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-mutants-
+
+      - name: Install cargo-mutants
+        run: cargo install cargo-mutants --locked
+
+      - name: Run cargo-mutants
+        run: |
+          cargo mutants \
+            -p automint-registry \
+            -p automint-bot-nft \
+            -p automint-token \
+            -p automint-accrual \
+            --output mutants-report \
+            --timeout 60 \
+            || true
+        # `|| true`: cargo-mutants exits non-zero whenever any mutant
+        # survives, which is the expected/common case for a first run on an
+        # existing codebase. We want the report uploaded either way; a
+        # human triages the results rather than the job hard-failing every
+        # week. Tighten this (drop `|| true`) once the surviving-mutant
+        # count is at a baseline the team is prepared to gate on.
+
+      - name: Upload mutants report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutants-report
+          path: mutants-report/
+          retention-days: 30

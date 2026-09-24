@@ -1,251 +1,474 @@
-'use client';
-import { useState } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { ShoppingBag, RefreshCw, Filter, Bot, Loader2 } from 'lucide-react';
-import { useWallet } from '@/hooks/useWallet';
-import { useMarketplace } from '@/hooks/useMarketplace';
-import { useAccrual } from '@/hooks/useAccrual';
-import { BotListingCard } from '@/components/marketplace/BotListingCard';
-import { ListBotModal } from '@/components/marketplace/ListBotModal';
-import { BotCard } from '@/components/dashboard/BotCard';
-import { CardSkeleton } from '@/components/ui/Skeleton';
-import { TIER_META } from '@/types';
-import type { BotNFT } from '@/types';
+"use client";
 
-type Tab = 'browse' | 'my-bots' | 'my-listings';
+import { useMemo, useState } from "react";
+import { Store, Wallet, PackageOpen, Tag, SlidersHorizontal } from "lucide-react";
+import clsx from "clsx";
+import { useWalletStore, selectPublicKey } from "@/store/walletStore";
+import {
+  useListings,
+  useMyListings,
+  useBuyBot,
+  useCancelListing,
+} from "@/hooks/useMarketplace";
+import { useAllBotDetails } from "@/hooks/useBotDetails";
+import { useBots } from "@/hooks/useAccrual";
+import BotListingCard from "@/components/marketplace/BotListingCard";
+import BotCard from "@/components/dashboard/BotCard";
+import ListBotModal from "@/components/marketplace/ListBotModal";
+import { CardSkeleton, BotCardSkeleton } from "@/components/ui/Skeleton";
+import { ErrorState } from "@/components/ui/ErrorState";
+import type { BotNFT, BotTier, MarketplaceListing } from "@/types";
+
+const TIERS: BotTier[] = ["Basic", "Bronze", "Silver", "Gold", "Diamond"];
+
+type Tab = "all" | "mine";
+type TierFilter = "all" | BotTier;
+type PriceFilter = "any" | "under100" | "100to1000" | "over1000";
+type SortOrder = "recent" | "priceAsc" | "priceDesc";
+
+const PRICE_FILTERS: { value: PriceFilter; label: string }[] = [
+  { value: "any", label: "Any price" },
+  { value: "under100", label: "Under 100 XLM" },
+  { value: "100to1000", label: "100 – 1,000 XLM" },
+  { value: "over1000", label: "Over 1,000 XLM" },
+];
+
+const STROOPS_PER_100_XLM = 1_000_000_000n;
+const STROOPS_PER_1000_XLM = 10_000_000_000n;
+
+function matchesPriceFilter(listing: MarketplaceListing, filter: PriceFilter): boolean {
+  switch (filter) {
+    case "any":
+      return true;
+    case "under100":
+      return listing.price < STROOPS_PER_100_XLM;
+    case "100to1000":
+      return listing.price >= STROOPS_PER_100_XLM && listing.price <= STROOPS_PER_1000_XLM;
+    case "over1000":
+      return listing.price > STROOPS_PER_1000_XLM;
+  }
+}
+
+function compareStroops(a: bigint, b: bigint): number {
+  if (a < b) return -1;
+  if (a > b) return 1;
+  return 0;
+}
 
 export default function MarketplacePage() {
-  const { isConnected, publicKey } = useWallet();
-  const { listings, myListings, loadingListings, isBuying, isCancelling, isMintingTier, buyBot, cancelListing, listBot, mintTierBot, isListing, refetch } =
-    useMarketplace(publicKey);
-  const { bots } = useAccrual(publicKey);
+  const publicKey = useWalletStore(selectPublicKey);
+  const [tab, setTab] = useState<Tab>("all");
+  const [tierFilter, setTierFilter] = useState<TierFilter>("all");
+  const [priceFilter, setPriceFilter] = useState<PriceFilter>("any");
+  const [sort, setSort] = useState<SortOrder>("recent");
+  const [listedBot, setListedBot] = useState<BotNFT | null>(null);
+  const [buyingId, setBuyingId] = useState<bigint | null>(null);
+  const [cancellingId, setCancellingId] = useState<bigint | null>(null);
 
-  const [activeTab, setActiveTab] = useState<Tab>('browse');
-  const [listingBot, setListingBot] = useState<BotNFT | null>(null);
-  const [tierFilter, setTierFilter] = useState<number | null>(null);
+  const {
+    data: allListings,
+    isLoading: isListingsLoading,
+    isError: isListingsError,
+    error: listingsError,
+    refetch: refetchListings,
+    isRefetching: isListingsRefetching,
+  } = useListings();
 
-  const filteredListings = tierFilter !== null ? listings.filter((l) => l.botTier === tierFilter) : listings;
+  const {
+    data: myListings,
+    isLoading: isMyListingsLoading,
+    isError: isMyListingsError,
+    error: myListingsError,
+    refetch: refetchMyListings,
+    isRefetching: isMyListingsRefetching,
+  } = useMyListings();
 
-  const TABS: { id: Tab; label: string }[] = [
-    { id: 'browse', label: `Browse (${listings.length})` },
-    ...(isConnected
-      ? [
-          { id: 'my-bots' as Tab, label: `My Bots (${bots.length})` },
-          { id: 'my-listings' as Tab, label: `My Listings (${myListings.filter((l) => l.active).length})` },
-        ]
-      : []),
-  ];
+  const { data: ownBotIds = [] } = useBots();
 
-  return (
-    <div className="max-w-6xl mx-auto px-4 sm:px-6 py-8">
+  // Bot details (tier, name, accrual rate) for the visible listings plus the
+  // connected user's own bots, resolved through `useAllBotDetails` so an
+  // anonymous visitor still gets real tier metadata for active listings.
+  const relevantBotIds = useMemo(() => {
+    const ids = new Set<bigint>();
+    (allListings ?? []).forEach((l) => ids.add(l.bot_id));
+    (myListings ?? []).forEach((l) => ids.add(l.bot_id));
+    ownBotIds.forEach((id) => ids.add(id));
+    return Array.from(ids);
+  }, [allListings, myListings, ownBotIds]);
 
-      {/* Header */}
-      <div className="flex items-center justify-between mb-8">
-        <div>
-          <h1 className="memefi-h2" style={{ fontSize: '32px', display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <ShoppingBag className="w-7 h-7" style={{ color: 'var(--gold)' }} />
-            Marketplace
-          </h1>
-          <p className="text-sm mt-1" style={{ color: 'var(--muted)' }}>
-            Buy and sell Bot NFTs peer-to-peer on Stellar
-          </p>
-        </div>
+  const { data: botDetails = [] } = useAllBotDetails(relevantBotIds);
+
+  const botMap = useMemo(() => {
+    const map = new Map<bigint, BotNFT>();
+    botDetails.forEach((bot) => map.set(bot.id, bot));
+    return map;
+  }, [botDetails]);
+
+  const buy = useBuyBot();
+  const cancel = useCancelListing();
+
+  const sourceListings = tab === "mine" ? myListings : allListings;
+
+  const filteredListings = useMemo(() => {
+    let list = (sourceListings ?? []).filter(
+      (l) => matchesPriceFilter(l, priceFilter) && (tierFilter === "all" || botMap.get(l.bot_id)?.tier === tierFilter),
+    );
+    if (sort === "priceAsc") {
+      list = [...list].sort((a, b) => compareStroops(a.price, b.price));
+    } else if (sort === "priceDesc") {
+      list = [...list].sort((a, b) => compareStroops(b.price, a.price));
+    }
+    return list;
+  }, [sourceListings, priceFilter, tierFilter, botMap, sort]);
+
+  const hasFilters = tierFilter !== "all" || priceFilter !== "any";
+
+  const clearFilters = () => {
+    setTierFilter("all");
+    setPriceFilter("any");
+  };
+
+  // Owned bots that aren't already listed — these are the ones eligible to
+  // go on sale from this page.
+  const unlistedOwnedBots = useMemo(() => {
+    const listedIds = new Set((myListings ?? []).map((l) => l.bot_id));
+    return ownBotIds
+      .map((id) => botMap.get(id))
+      .filter((bot): bot is BotNFT => bot !== undefined && !listedIds.has(bot.id));
+  }, [ownBotIds, myListings, botMap]);
+
+  const handleBuy = (listingId: bigint) => {
+    setBuyingId(listingId);
+    buy.mutate(listingId, { onSettled: () => setBuyingId(null) });
+  };
+
+  const handleCancel = (listingId: bigint) => {
+    setCancellingId(listingId);
+    cancel.mutate(listingId, { onSettled: () => setCancellingId(null) });
+  };
+
+  const handleListForSale = (botId: bigint) => {
+    const bot = botMap.get(botId);
+    if (bot) setListedBot(bot);
+  };
+
+  const chipClass = (active: boolean) =>
+    clsx(
+      "rounded-full border px-3 py-1 text-xs font-medium transition-colors",
+      "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+      active
+        ? "border-gold/50 bg-gold/15 text-gold"
+        : "border-liner bg-card-2 text-muted hover:text-text hover:border-liner-hover",
+    );
+
+  const renderFilters = () => (
+    <div className="mb-6 flex flex-col gap-3" data-testid="marketplace-filters">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="w-16 text-xs uppercase tracking-wider text-muted">Tier</span>
         <button
-          onClick={() => refetch()}
-          aria-label="Refresh"
-          className="p-2 rounded-xl transition-colors"
-          style={{ border: '1px solid var(--liner)', color: 'var(--muted)', background: 'transparent' }}
-          onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--text)')}
-          onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--muted)')}
+          type="button"
+          className={chipClass(tierFilter === "all")}
+          aria-pressed={tierFilter === "all"}
+          onClick={() => setTierFilter("all")}
         >
-          <RefreshCw className="w-4 h-4" />
+          All
         </button>
-      </div>
-
-      {/* Tabs */}
-      <div
-        className="flex items-center gap-1 mb-7 p-1 w-fit rounded-2xl"
-        style={{ background: 'var(--card)' }}
-      >
-        {TABS.map(({ id, label }) => (
+        {TIERS.map((tier) => (
           <button
-            key={id}
-            onClick={() => setActiveTab(id)}
-            className="px-4 py-2 rounded-xl text-sm font-semibold transition-all"
-            style={
-              activeTab === id
-                ? { background: 'var(--card-2)', color: 'var(--text)' }
-                : { color: 'var(--muted)', background: 'transparent' }
-            }
+            key={tier}
+            type="button"
+            className={chipClass(tierFilter === tier)}
+            aria-pressed={tierFilter === tier}
+            onClick={() => setTierFilter(tierFilter === tier ? "all" : tier)}
           >
-            {label}
+            {tier}
           </button>
         ))}
       </div>
 
-      {/* Browse tab */}
-      {activeTab === 'browse' && (
-        <div>
-          {/* Tier filter */}
-          <div className="flex items-center gap-2 mb-6 flex-wrap">
-            <Filter className="w-4 h-4" style={{ color: 'var(--muted)' }} />
-            <button
-              onClick={() => setTierFilter(null)}
-              className="badge transition-all"
-              style={
-                tierFilter === null
-                  ? { background: 'rgba(52,224,138,0.14)', color: 'var(--green)' }
-                  : { background: 'var(--card)', color: 'var(--muted)' }
-              }
-            >
-              All
-            </button>
-            {Object.values(TIER_META).map((meta) => (
-              <button
-                key={meta.index}
-                onClick={() => setTierFilter(meta.index === tierFilter ? null : meta.index)}
-                className="badge transition-all"
-                style={
-                  tierFilter === meta.index
-                    ? { background: `${meta.color}20`, color: meta.color }
-                    : { background: 'var(--card)', color: 'var(--muted)' }
-                }
-              >
-                {meta.emoji} {meta.tier}
-              </button>
-            ))}
-          </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="w-16 text-xs uppercase tracking-wider text-muted">Price</span>
+        {PRICE_FILTERS.map((f) => (
+          <button
+            key={f.value}
+            type="button"
+            className={chipClass(priceFilter === f.value)}
+            aria-pressed={priceFilter === f.value}
+            onClick={() => setPriceFilter(priceFilter === f.value ? "any" : f.value)}
+          >
+            {f.label}
+          </button>
+        ))}
+      </div>
 
-          {loadingListings ? (
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
-              {Array.from({ length: 8 }).map((_, i) => <CardSkeleton key={i} />)}
-            </div>
-          ) : filteredListings.length === 0 ? (
-            <div className="rounded-2xl p-16 text-center" style={{ background: 'var(--card)' }}>
-              <Bot className="w-12 h-12 mx-auto mb-3" style={{ color: 'var(--muted)', opacity: 0.4 }} />
-              <p style={{ color: 'var(--muted)' }}>No listings yet.</p>
-              {isConnected && <p className="text-sm mt-1" style={{ color: 'var(--muted)', opacity: 0.6 }}>List one of your bots to get started!</p>}
-            </div>
-          ) : (
-            <AnimatePresence mode="popLayout">
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
-                {filteredListings.map((listing) => (
-                  <BotListingCard
-                    key={String(listing.id)}
-                    listing={listing}
-                    currentUserAddress={publicKey}
-                    onBuy={buyBot}
-                    onCancel={cancelListing}
-                    isBuying={isBuying}
-                    isCancelling={isCancelling}
-                  />
-                ))}
-              </div>
-            </AnimatePresence>
-          )}
-        </div>
-      )}
-
-      {/* My bots tab */}
-      {activeTab === 'my-bots' && (
-        <div>
-          {bots.length === 0 ? (
-            <div className="rounded-2xl p-12 text-center" style={{ background: 'var(--card)' }}>
-              <Bot className="w-12 h-12 mx-auto mb-3" style={{ color: 'var(--muted)', opacity: 0.4 }} />
-              <p style={{ color: 'var(--muted)' }}>You don&apos;t own any bots yet.</p>
-            </div>
-          ) : (
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
-              {bots.map((bot) => <BotCard key={String(bot.id)} bot={bot} onList={setListingBot} />)}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* My listings tab */}
-      {activeTab === 'my-listings' && (
-        <div>
-          {myListings.length === 0 ? (
-            <div className="rounded-2xl p-12 text-center" style={{ background: 'var(--card)' }}>
-              <ShoppingBag className="w-12 h-12 mx-auto mb-3" style={{ color: 'var(--muted)', opacity: 0.4 }} />
-              <p style={{ color: 'var(--muted)' }}>No active listings.</p>
-            </div>
-          ) : (
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
-              {myListings.map((listing) => (
-                <BotListingCard
-                  key={String(listing.id)}
-                  listing={listing}
-                  currentUserAddress={publicKey}
-                  onBuy={buyBot}
-                  onCancel={cancelListing}
-                  isBuying={isBuying}
-                  isCancelling={isCancelling}
-                />
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Buy new bots */}
-      <div className="mt-14">
-        <h2
-          className="font-black uppercase tracking-wide text-base mb-5"
-          style={{ fontFamily: "'Sora', sans-serif", color: 'var(--text)' }}
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="w-16 text-xs uppercase tracking-wider text-muted">Sort</span>
+        <select
+          value={sort}
+          onChange={(e) => setSort(e.target.value as SortOrder)}
+          aria-label="Sort listings by price"
+          className="rounded-lg border border-liner bg-card-2 px-3 py-1.5 text-xs font-medium text-text focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
         >
-          Buy New Bots{' '}
-          <span style={{ color: 'var(--muted)', fontWeight: 400, textTransform: 'none', fontSize: '13px' }}>
-            direct from contract
-          </span>
-        </h2>
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
-          {Object.values(TIER_META)
-            .filter((m) => m.tier !== 'Basic')
-            .map((meta) => (
-              <motion.div
-                key={meta.tier}
-                whileHover={{ y: -5 }}
-                className="mf-card-2 text-center"
-                style={{ padding: '24px 16px', borderRadius: '20px', border: `1px solid ${meta.color}22` }}
-              >
-                <div className="text-4xl mb-3">{meta.emoji}</div>
-                <div
-                  className="text-xs font-black uppercase tracking-widest mb-2"
-                  style={{ fontFamily: "'Sora', sans-serif", color: meta.color }}
-                >
-                  {meta.tier}
-                </div>
-                <div
-                  className="font-black mb-0.5"
-                  style={{ fontFamily: "'Sora', sans-serif", fontSize: '24px', color: 'var(--gold)', lineHeight: 1 }}
-                >
-                  {meta.ratePerHour}
-                </div>
-                <div className="text-xs mb-4" style={{ color: 'var(--muted)' }}>pts/hour</div>
-                <div className="text-sm font-bold mb-4" style={{ color: 'var(--gold)' }}>
-                  {meta.priceXlm.toLocaleString()} XLM
-                </div>
-                <button
-                  disabled={!isConnected || isMintingTier}
-                  onClick={() => isConnected && mintTierBot(meta.index)}
-                  className="w-full py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5"
-                  style={{ background: `${meta.color}18`, color: meta.color, border: `1px solid ${meta.color}35`, cursor: isConnected ? 'pointer' : 'not-allowed', opacity: !isConnected ? 0.5 : 1 }}
-                >
-                  {isMintingTier ? <><Loader2 className="w-3 h-3 animate-spin" /> Minting…</> : isConnected ? 'Buy Now' : 'Connect Wallet'}
-                </button>
-              </motion.div>
-            ))}
+          <option value="recent">Recently listed</option>
+          <option value="priceAsc">Price: low to high</option>
+          <option value="priceDesc">Price: high to low</option>
+        </select>
+      </div>
+    </div>
+  );
+
+  const renderEmptyFiltered = () => (
+    <div
+      data-testid="marketplace-empty-filtered"
+      className="flex flex-col items-center justify-center rounded-2xl border border-liner bg-card px-6 py-12 text-center"
+    >
+      <SlidersHorizontal className="mb-3 h-8 w-8 text-muted/40" aria-hidden="true" />
+      <p className="text-sm text-muted">No listings match your filters.</p>
+      <button
+        type="button"
+        onClick={clearFilters}
+        className="mt-4 text-sm font-medium text-gold hover:underline"
+      >
+        Clear filters
+      </button>
+    </div>
+  );
+
+  const renderListingGrid = (loading: boolean, error: unknown, retrying: boolean, onRetry: () => void, emptyMessage: string, gridTestId: string) => {
+    if (loading) {
+      return (
+        <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <CardSkeleton key={i} />
+          ))}
+        </div>
+      );
+    }
+    if (error) {
+      return (
+        <ErrorState
+          error={error}
+          title="Failed to Load Marketplace Listings"
+          onRetry={onRetry}
+          isRetrying={retrying}
+          data-testid="marketplace-error-state"
+        />
+      );
+    }
+    if (filteredListings.length === 0) {
+      return hasFilters ? renderEmptyFiltered() : (
+        <div
+          data-testid="marketplace-empty"
+          className="flex flex-col items-center justify-center rounded-2xl border border-liner bg-card px-6 py-12 text-center"
+        >
+          <PackageOpen className="mb-3 h-8 w-8 text-muted/40" aria-hidden="true" />
+          <p className="text-sm text-muted">{emptyMessage}</p>
+        </div>
+      );
+    }
+    return (
+      <div data-testid={gridTestId} className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+        {filteredListings.map((listing) => {
+          const bot = botMap.get(listing.bot_id);
+          return (
+            <BotListingCard
+              key={listing.id.toString()}
+              listing={listing}
+              {...(bot ? { bot } : {})}
+              connectedAddress={publicKey}
+              onBuy={handleBuy}
+              onCancel={handleCancel}
+              isBuying={buyingId === listing.id}
+              isCancelling={cancellingId === listing.id}
+            />
+          );
+        })}
+      </div>
+    );
+  };
+
+  return (
+    <main className="mx-auto max-w-7xl px-6 py-8">
+      {/* Page header */}
+      <div className="mb-8 flex flex-wrap items-center gap-3">
+        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gold/15">
+          <Store className="h-5 w-5 text-gold" aria-hidden="true" />
+        </div>
+        <div>
+          <h1 className="font-display text-2xl font-bold text-text">Marketplace</h1>
+          <p className="text-sm text-muted">Buy and sell AI bot NFTs with AMT</p>
         </div>
       </div>
 
-      <ListBotModal
-        bot={listingBot}
-        isOpen={!!listingBot}
-        onClose={() => setListingBot(null)}
-        onList={listBot}
-        isListing={isListing}
-      />
-    </div>
+      {/* Connect banner — listings stay visible for visitors (#499) */}
+      {!publicKey && (
+        <div
+          data-testid="marketplace-connect-banner"
+          className="mb-6 flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-liner bg-card p-4"
+        >
+          <p className="flex items-center gap-2 text-sm text-muted">
+            <Wallet className="h-4 w-4 shrink-0" aria-hidden="true" />
+            Connect your wallet to buy bots and list your own.
+          </p>
+          <button
+            type="button"
+            onClick={() => useWalletStore.getState().setConnecting()}
+            className="btn-primary text-sm"
+          >
+            Connect Wallet
+          </button>
+        </div>
+      )}
+
+      {/* Tabs */}
+      <div
+        role="tablist"
+        aria-label="Marketplace views"
+        className="mb-6 inline-flex rounded-xl border border-liner bg-card p-1"
+      >
+        <button
+          type="button"
+          role="tab"
+          id="tab-all"
+          aria-selected={tab === "all"}
+          aria-controls="marketplace-all"
+          onClick={() => setTab("all")}
+          className={clsx(
+            "rounded-lg px-4 py-2 text-sm font-medium transition-colors",
+            tab === "all" ? "bg-gold/15 text-gold" : "text-muted hover:text-text",
+          )}
+        >
+          All Listings
+        </button>
+        <button
+          type="button"
+          role="tab"
+          id="tab-mine"
+          aria-selected={tab === "mine"}
+          aria-controls="marketplace-mine"
+          onClick={() => setTab("mine")}
+          className={clsx(
+            "rounded-lg px-4 py-2 text-sm font-medium transition-colors",
+            tab === "mine" ? "bg-gold/15 text-gold" : "text-muted hover:text-text",
+          )}
+        >
+          My Listings
+        </button>
+      </div>
+
+      {tab === "all" ? (
+        <section id="marketplace-all" role="tabpanel" aria-label="All listings">
+          {renderFilters()}
+          {renderListingGrid(
+            isListingsLoading,
+            isListingsError ? listingsError : null,
+            isListingsRefetching,
+            () => refetchListings(),
+            "No active listings right now. Check back soon.",
+            "marketplace-grid",
+          )}
+        </section>
+      ) : (
+        <section id="marketplace-mine" role="tabpanel" aria-label="My listings">
+          {!publicKey ? (
+            <div
+              data-testid="marketplace-mine-connect"
+              className="flex flex-col items-center justify-center rounded-2xl border border-liner bg-card px-6 py-12 text-center"
+            >
+              <Wallet className="mb-3 h-8 w-8 text-muted/40" aria-hidden="true" />
+              <h2 className="font-display text-lg font-semibold text-text">Connect Your Wallet</h2>
+              <p className="mt-1 text-sm text-muted">
+                Connect your wallet to list your bots and manage active listings.
+              </p>
+              <button
+                type="button"
+                onClick={() => useWalletStore.getState().setConnecting()}
+                className="btn-primary mt-5 text-sm"
+              >
+                Connect Wallet
+              </button>
+            </div>
+          ) : (
+            <>
+              {renderFilters()}
+
+              {/* Owned bots ready to list */}
+              <h2 className="mb-3 flex items-center gap-2 font-display text-base font-semibold text-text">
+                <Tag className="h-4 w-4 text-gold" aria-hidden="true" />
+                Owned Bots
+              </h2>
+              {unlistedOwnedBots.length === 0 ? (
+                <div
+                  data-testid="marketplace-no-owned"
+                  className="mb-8 rounded-2xl border border-liner bg-card px-6 py-8 text-center text-sm text-muted"
+                >
+                  No bots available to list. Mint a bot from the dashboard to get started.
+                </div>
+              ) : (
+                <div data-testid="marketplace-owned-grid" className="mb-8 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+                  {unlistedOwnedBots.map((bot) => (
+                    <BotCard key={bot.id.toString()} bot={bot} onListForSale={handleListForSale} />
+                  ))}
+                </div>
+              )}
+
+              {/* The user's active listings */}
+              <h2 className="mb-3 font-display text-base font-semibold text-text">
+                Your Active Listings
+              </h2>
+              {isMyListingsLoading ? (
+                <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+                  {Array.from({ length: 3 }).map((_, i) => (
+                    <BotCardSkeleton key={i} />
+                  ))}
+                </div>
+              ) : isMyListingsError ? (
+                <ErrorState
+                  error={myListingsError}
+                  title="Failed to Load Your Listings"
+                  onRetry={() => refetchMyListings()}
+                  isRetrying={isMyListingsRefetching}
+                  data-testid="marketplace-mine-error-state"
+                />
+              ) : filteredListings.length === 0 ? (
+                hasFilters ? (
+                  renderEmptyFiltered()
+                ) : (
+                  <div
+                    data-testid="marketplace-mine-empty"
+                    className="rounded-2xl border border-liner bg-card px-6 py-8 text-center text-sm text-muted"
+                  >
+                    You have no active listings yet. Pick an owned bot above to list it for sale.
+                  </div>
+                )
+              ) : (
+                <div data-testid="marketplace-mine-grid" className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+                  {filteredListings.map((listing) => {
+                    const bot = botMap.get(listing.bot_id);
+                    return (
+                      <BotListingCard
+                        key={listing.id.toString()}
+                        listing={listing}
+                        {...(bot ? { bot } : {})}
+                        connectedAddress={publicKey}
+                        onBuy={handleBuy}
+                        onCancel={handleCancel}
+                        isBuying={buyingId === listing.id}
+                        isCancelling={cancellingId === listing.id}
+                      />
+                    );
+                  })}
+                </div>
+              )}
+            </>
+          )}
+        </section>
+      )}
+
+      {/* List-for-sale modal */}
+      {listedBot && (
+        <ListBotModal bot={listedBot} isOpen onClose={() => setListedBot(null)} />
+      )}
+    </main>
   );
 }

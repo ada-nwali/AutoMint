@@ -1,60 +1,80 @@
-'use client';
-import { motion } from 'framer-motion';
-import { Coins, Loader2 } from 'lucide-react';
-import { formatPoints } from '@/types';
+"use client";
+
+import { motion } from "framer-motion";
+import { Loader2, Coins } from "lucide-react";
+import clsx from "clsx";
+import { useWalletStore, selectNetworkMismatch } from "@/store/walletStore";
 
 interface ClaimButtonProps {
-  pendingPoints: number;
-  isClaiming: boolean;
+  pendingPoints: number | bigint;
   onClaim: () => void;
-  disabled?: boolean;
+  isClaiming: boolean;
 }
 
-export function ClaimButton({ pendingPoints, isClaiming, onClaim, disabled }: ClaimButtonProps) {
-  const canClaim = pendingPoints > 0 && !disabled && !isClaiming;
+export default function ClaimButton({ pendingPoints, onClaim, isClaiming }: ClaimButtonProps) {
+  const points = typeof pendingPoints === "bigint" ? Number(pendingPoints) : pendingPoints;
+  // Claiming is a mutation: it stays disabled while Freighter is on the
+  // wrong network (#455). The runtime guard in executeTransaction is the
+  // backstop; this is the user-visible half.
+  const networkMismatch = useWalletStore(selectNetworkMismatch);
+  const disabled = isClaiming || points <= 0 || networkMismatch;
 
   return (
-    <div
-      className="mf-card flex flex-col h-full"
-      style={{ padding: '28px', background: 'var(--card)', borderRadius: '20px', alignItems: 'center', textAlign: 'center', justifyContent: 'center', gap: '20px' }}
+    <motion.div
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.3 }}
+      className="rounded-2xl border border-liner bg-card p-5 flex flex-col gap-4"
     >
-      {/* Pending amount */}
-      <div>
-        <p className="text-xs uppercase tracking-widest font-semibold mb-2" style={{ color: 'var(--muted)' }}>
-          Ready to Claim
-        </p>
-        <div style={{ fontFamily: "'Sora', sans-serif", fontWeight: 800, fontSize: '42px', lineHeight: 1, color: canClaim ? 'var(--green)' : 'var(--muted)', letterSpacing: '-1px' }}>
-          {formatPoints(pendingPoints)}
-        </div>
-        <div className="text-sm mt-1" style={{ color: 'var(--muted)' }}>pts</div>
-        {pendingPoints > 0 && (
-          <div className="badge badge-gold mt-3 mx-auto">
-            ≈ {Math.floor(pendingPoints / 100)} $AMT
-          </div>
-        )}
+      <div className="flex items-center justify-between">
+        <span className="text-sm text-muted" id="pending-points-label">
+          Pending Points
+        </span>
+        <span
+          className="font-display text-2xl font-bold text-gold"
+          aria-live="polite"
+          aria-atomic="true"
+          aria-labelledby="pending-points-label"
+        >
+          {points.toLocaleString()}
+        </span>
       </div>
 
-      {/* Button */}
-      <motion.button
-        whileHover={canClaim ? { scale: 1.03 } : {}}
-        whileTap={canClaim ? { scale: 0.97 } : {}}
-        onClick={canClaim ? onClaim : undefined}
-        disabled={!canClaim}
-        className="w-full btn-primary justify-center"
-        style={{ borderRadius: '14px', padding: '14px' }}
-      >
-        {isClaiming ? (
-          <><Loader2 className="w-4 h-4 animate-spin" /> Claiming…</>
-        ) : (
-          <><Coins className="w-4 h-4" /> {canClaim ? 'Claim Points' : pendingPoints === 0 ? 'No points yet' : 'Connect wallet'}</>
+      <button
+        type="button"
+        onClick={onClaim}
+        disabled={disabled}
+        aria-busy={isClaiming}
+        title={
+          networkMismatch && !isClaiming
+            ? "Freighter is on the wrong network — switch to Testnet to claim"
+            : undefined
+        }
+        className={clsx(
+          "flex min-h-11 items-center justify-center gap-2 rounded-xl border px-4 py-2.5 text-sm font-medium transition-all",
+          "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+          disabled
+            ? "border-liner bg-card-2 text-muted cursor-not-allowed opacity-50"
+            : "border-gold/30 bg-gold/10 text-gold hover:bg-gold/20 hover:border-gold/50"
         )}
-      </motion.button>
-
-      {pendingPoints === 0 && (
-        <p className="text-xs" style={{ color: 'var(--muted)', opacity: 0.7 }}>
-          Points accrue automatically. Come back soon!
-        </p>
-      )}
-    </div>
+      >
+        {networkMismatch && !isClaiming ? (
+          <>
+            <Coins className="h-4 w-4" aria-hidden="true" />
+            Switch Network to Claim
+          </>
+        ) : isClaiming ? (
+          <>
+            <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+            Claiming...
+          </>
+        ) : (
+          <>
+            <Coins className="h-4 w-4" aria-hidden="true" />
+            Claim Rewards
+          </>
+        )}
+      </button>
+    </motion.div>
   );
 }

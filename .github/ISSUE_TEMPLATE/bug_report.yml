@@ -1,0 +1,96 @@
+name: Bug Report
+description: Report bugs found during testnet implementation build-out
+title: "[Bug]: "
+labels: ["type:bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for reporting a bug! This template is for issues found during the testnet implementation phase.
+
+        **Note**: This bug report will be tracked against the `testnet-implementation` branch.
+
+  - type: textarea
+    id: bug-description
+    attributes:
+      label: Bug Description
+      description: A clear and concise description of what the bug is.
+      placeholder: Describe the issue...
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps-to-reproduce
+    attributes:
+      label: Steps to Reproduce
+      description: What steps are required to reproduce the behavior?
+      placeholder: |
+        1. Go to '...'
+        2. Click on '....'
+        3. Scroll down to '....'
+        4. See error
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected-behavior
+    attributes:
+      label: Expected Behavior
+      description: A clear description of what you expected to happen.
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual-behavior
+    attributes:
+      label: Actual Behavior / Screenshots
+      description: Describe what actually happened, including error logs, screenshots, or transaction IDs.
+      placeholder: Include testnet transaction hashes if applicable
+    validations:
+      required: false
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected Area
+      options:
+        - "area:contract"
+        - "area:frontend"
+        - "area:docs"
+        - "area:ci"
+        - "area:setup"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: contract
+    attributes:
+      label: Contract (if applicable)
+      description: Which contract is affected?
+      options:
+        - "Not applicable"
+        - "contract:registry"
+        - "contract:bot_nft"
+        - "contract:accrual"
+        - "contract:marketplace"
+        - "contract:token"
+    validations:
+      required: false
+
+  - type: input
+    id: environment
+    attributes:
+      label: Environment Details
+      description: OS, Node version, Freighter version, Rust version, testnet network details
+      placeholder: e.g. macOS 14.5, Node v18.20.0, Chrome 125, Freighter v5.8.0, Soroban testnet
+    validations:
+      required: false
+
+  - type: input
+    id: testnet-account
+    attributes:
+      label: Testnet Account (optional)
+      description: Your testnet account address for reproduction (DO NOT use mainnet addresses)
+      placeholder: G... (testnet address only)
+    validations:
+      required: false

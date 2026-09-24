@@ -1,0 +1,59 @@
+name: Contract & Security Concern
+description: Report a smart contract issue, security vulnerability, or invariant concern
+title: "[Security/Contract]: "
+labels: ["type:security", "area:contract"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form to report smart contract logic bugs, state integrity issues, TTL management risks, or auth security concerns.
+
+  - type: dropdown
+    id: affected-contract
+    attributes:
+      label: Affected Contract
+      options:
+        - "contract:registry"
+        - "contract:bot_nft"
+        - "contract:accrual"
+        - "contract:marketplace"
+        - "contract:token"
+        - "Multiple / Cross-Contract Interaction"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Estimated Severity / Impact
+      options:
+        - "Critical (Exploitable / Direct Loss of Funds / State Corruption)"
+        - "High (Denial of Service / Unintended State Mutation)"
+        - "Medium (Edge-case Logic Violation / Invariant Failure)"
+        - "Low / Informational (Gas Efficiency / Naming / Code Quality)"
+    validations:
+      required: true
+
+  - type: textarea
+    id: vulnerability-details
+    attributes:
+      label: Vulnerability / Risk Description
+      description: Detailed explanation of the contract issue or invariant breach.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proof-of-concept
+    attributes:
+      label: Proof of Concept / Reproduction Steps
+      description: Provide steps, Rust test code, or Soroban CLI commands to demonstrate the issue.
+    validations:
+      required: false
+
+  - type: textarea
+    id: recommended-remediation
+    attributes:
+      label: Recommended Remediation
+      description: Suggested fix or architectural modification.
+    validations:
+      required: false

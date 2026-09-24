@@ -1,309 +1,235 @@
-'use client';
-import Link from 'next/link';
-import { motion } from 'framer-motion';
-import {
-  Zap, Trophy, ShoppingBag, ArrowRight, Check, Bot, Coins,
-  Cpu, Star, Gem, Layers, Globe, Lock, TrendingUp,
-} from 'lucide-react';
-import { useWallet } from '@/hooks/useWallet';
+"use client";
 
-const LIVE_STATS = [
-  { label: 'Bots Deployed',   value: '3,241',   color: 'var(--green)' },
-  { label: 'Total $AMT Mined',value: '847K',     color: 'var(--gold)' },
-  { label: 'P2P Volume (XLM)',value: '92,400',   color: 'var(--purple)' },
-  { label: 'Active Miners',   value: '1,089',    color: 'var(--blue)' },
+import Link from "next/link";
+import { motion } from "framer-motion";
+import { Bot, TrendingUp, Shield, Zap, ArrowRight, Users, Activity, Star } from "lucide-react";
+import { TIER_META, type BotTier } from "@/types";
+import { useTiers } from "@/hooks/useTiers";
+import { stroopsToXlmString } from "@/lib/format";
+
+const tiers: BotTier[] = ["Basic", "Bronze", "Silver", "Gold", "Diamond"];
+
+const stats = [
+  { label: "Bots Minted", value: "12,480", icon: Bot },
+  { label: "Active Users", value: "3,200+", icon: Users },
+  { label: "Points Distributed", value: "1.2M", icon: Activity },
+  { label: "Uptime", value: "99.9%", icon: Shield },
 ];
 
-// Each tier's icon and accent
-const BOT_TIER_CARDS = [
-  { label: 'Basic',   icon: Bot,   color: '#9a8f81', rate: '1' },
-  { label: 'Silver',  icon: Cpu,   color: '#5bb8ff', rate: '25' },
-  { label: 'Gold',    icon: Star,  color: '#ffcf4d', rate: '100' },
-  { label: 'Diamond', icon: Gem,   color: '#9d7bff', rate: '500' },
+const steps = [
+  {
+    step: "01",
+    title: "Connect Wallet",
+    description: "Link your Stellar wallet to get started in seconds.",
+  },
+  {
+    step: "02",
+    title: "Mint a Bot",
+    description: "Choose a tier and mint your AI bot NFT on-chain.",
+  },
+  {
+    step: "03",
+    title: "Earn Points",
+    description: "Your bot accrues points daily based on its tier.",
+  },
+  {
+    step: "04",
+    title: "Trade & Upgrade",
+    description: "List on the marketplace or upgrade to a higher tier.",
+  },
 ];
 
-const HOW_IT_WORKS = [
-  { step: 1, icon: Globe,     title: 'Connect Wallet',    desc: 'Link your Freighter wallet. No seed phrases, no custody risk.' },
-  { step: 2, icon: Bot,       title: 'Claim Free Bot',    desc: 'Register and instantly receive a Basic Bot that starts accruing points.' },
-  { step: 3, icon: TrendingUp,title: 'Auto-Earn Points',  desc: 'Points accrue every second based on your fleet — no tapping required.' },
-  { step: 4, icon: Coins,     title: 'Claim $AMT',        desc: 'Convert points to $AMT on-chain. Full Soroban contract, fully transparent.' },
+const features = [
+  {
+    icon: Zap,
+    title: "Instant Settlement",
+    description: "All transactions settle on Stellar in under 5 seconds.",
+  },
+  {
+    icon: Shield,
+    title: "On-Chain Ownership",
+    description: "Your bots are NFTs — fully owned, transferable, and verifiable.",
+  },
+  {
+    icon: TrendingUp,
+    title: "Daily Accrual",
+    description: "Higher-tier bots earn more points every day automatically.",
+  },
+  {
+    icon: Star,
+    title: "Tier Progression",
+    description: "Upgrade from Basic to Diamond and multiply your earnings.",
+  },
 ];
 
-const FEATURES = [
-  'Bot NFTs are on-chain assets — own them forever',
-  'Points accrue 24/7, even when your browser is closed',
-  'P2P bot marketplace with trustless escrow',
-  'Global leaderboard stored on Stellar',
-  'Near-zero fees — fractions of a cent per transaction',
-  'Fully open-source Soroban contracts',
-];
-
-export default function LandingPage() {
-  const { isConnected, connect, status } = useWallet();
+export default function HomePage() {
+  // Rates and prices come from the bot_nft contract (#478); only colour and
+  // emoji are client-side.
+  const { data: tierInfo } = useTiers();
 
   return (
-    <div style={{ background: 'var(--bg)' }}>
-
-      {/* ── Hero ──────────────────────────────────────────────────────────────── */}
-      <section className="relative overflow-hidden pt-20 pb-28">
-        <div className="hero-glow absolute inset-0 pointer-events-none" />
-
-        <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 relative">
+    <div className="flex flex-col">
+      {/* Hero */}
+      <section className="relative overflow-hidden px-6 py-24 md:py-32">
+        <div
+          className="pointer-events-none absolute inset-0"
+          style={{
+            background:
+              "radial-gradient(ellipse 80% 50% at 50% -20%, var(--memefi-hero-glow-start), transparent), radial-gradient(ellipse 60% 40% at 70% 10%, var(--memefi-hero-glow-mid), transparent)",
+          }}
+        />
+        <div className="relative mx-auto max-w-4xl text-center">
+          <motion.h1
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.5 }}
+            className="font-display text-4xl font-extrabold leading-tight tracking-tight md:text-6xl"
+          >
+            Mint, Earn & Trade
+            <br />
+            <span className="text-gold">AI Bot NFTs</span>
+          </motion.h1>
+          <motion.p
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.5, delay: 0.1 }}
+            className="mx-auto mt-6 max-w-2xl text-lg text-muted md:text-xl"
+          >
+            The first AI bot NFT platform on Stellar. Mint unique bots, earn
+            points daily, and trade on a decentralized marketplace.
+          </motion.p>
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.45 }}
-            className="text-center"
+            transition={{ duration: 0.5, delay: 0.2 }}
+            className="mt-10 flex flex-wrap items-center justify-center gap-4"
           >
-            {/* Live badge */}
-            <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full mb-8 text-xs font-bold uppercase tracking-widest"
-              style={{ background: 'rgba(52,224,138,0.1)', color: 'var(--green)', border: '1px solid rgba(52,224,138,0.22)' }}
+            <Link href="/dashboard" className="btn-primary text-base">
+              Launch App <ArrowRight className="h-4 w-4" />
+            </Link>
+            <a
+              href="#tiers"
+              className="rounded-xl border border-liner px-6 py-3 text-sm font-semibold text-muted hover:border-text/30 hover:text-text transition-all"
             >
-              <span className="w-1.5 h-1.5 rounded-full pulse-dot" style={{ background: 'var(--green)' }} />
-              Live on Stellar Testnet
-            </div>
-
-            <h1 className="memefi-h1 mb-5">
-              Idle Bot Mining<br />
-              <span style={{ color: 'var(--gold)' }}>on Stellar</span>
-            </h1>
-
-            <p className="max-w-xl mx-auto mb-10 text-sm sm:text-base"
-              style={{ color: 'var(--muted)', lineHeight: 1.7 }}
-            >
-              Deploy NFT Bots that auto-accumulate{' '}
-              <span style={{ color: 'var(--text)', fontWeight: 600 }}>$AMT tokens</span>{' '}
-              every second via Soroban smart contracts. No tapping. Pure passive earnings on-chain.
-            </p>
-
-            {/* CTAs */}
-            <div className="flex flex-col sm:flex-row gap-3 justify-center mb-16">
-              {isConnected ? (
-                <Link href="/dashboard">
-                  <motion.button whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }} className="btn-primary">
-                    Open Dashboard <ArrowRight className="w-4 h-4" />
-                  </motion.button>
-                </Link>
-              ) : (
-                <motion.button
-                  onClick={connect}
-                  disabled={status === 'connecting'}
-                  whileHover={{ scale: 1.03 }}
-                  whileTap={{ scale: 0.97 }}
-                  className="btn-primary"
-                >
-                  <Zap className="w-4 h-4" />
-                  {status === 'connecting' ? 'Connecting…' : 'Start Earning Free'}
-                </motion.button>
-              )}
-              <Link href="/leaderboard">
-                <motion.button
-                  whileHover={{ scale: 1.03 }}
-                  whileTap={{ scale: 0.97 }}
-                  className="btn-ghost"
-                >
-                  <Trophy className="w-4 h-4" /> View Leaderboard
-                </motion.button>
-              </Link>
-            </div>
-
-            {/* Floating bot tier cards */}
-            <div className="flex justify-center items-end gap-4 sm:gap-6">
-              {BOT_TIER_CARDS.map(({ label, icon: Icon, color, rate }, i) => (
-                <motion.div
-                  key={label}
-                  animate={{ y: [0, -10, 0] }}
-                  transition={{ duration: 3.2 + i * 0.5, repeat: Infinity, ease: 'easeInOut', delay: i * 0.4 }}
-                  className="flex flex-col items-center gap-2"
-                >
-                  <div
-                    className="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl flex items-center justify-center"
-                    style={{
-                      background: `${color}14`,
-                      border: `1px solid ${color}30`,
-                      boxShadow: `0 8px 32px ${color}20`,
-                    }}
-                  >
-                    <Icon className="w-7 h-7" style={{ color }} />
-                  </div>
-                  <div className="text-center">
-                    <div className="text-xs font-black uppercase" style={{ fontFamily: "'Sora', sans-serif", color }}>{label}</div>
-                    <div className="text-xs" style={{ color: 'var(--muted)' }}>{rate}/hr</div>
-                  </div>
-                </motion.div>
-              ))}
-            </div>
+              View Tiers
+            </a>
           </motion.div>
         </div>
       </section>
 
-      {/* ── Live stats band ────────────────────────────────────────────────────── */}
-      <section style={{ borderTop: '1px solid var(--liner)', borderBottom: '1px solid var(--liner)', background: 'var(--card)' }} className="py-8">
-        <div className="max-w-5xl mx-auto px-4 grid grid-cols-2 sm:grid-cols-4 gap-6 text-center">
-          {LIVE_STATS.map(({ label, value, color }) => (
-            <div key={label}>
-              <div className="font-black" style={{ fontFamily: "'Sora', sans-serif", fontSize: '22px', color, letterSpacing: '-0.5px' }}>{value}</div>
-              <div className="text-xs font-semibold tracking-wider uppercase mt-1" style={{ color: 'var(--muted)' }}>{label}</div>
+      {/* Stats band */}
+      <section className="border-y border-liner bg-card">
+        <div className="mx-auto grid max-w-5xl grid-cols-2 gap-6 px-6 py-10 md:grid-cols-4">
+          {stats.map((stat) => (
+            <div key={stat.label} className="flex flex-col items-center gap-2 text-center">
+              <stat.icon className="h-5 w-5 text-gold" />
+              <span className="font-display text-2xl font-bold text-text">
+                {stat.value}
+              </span>
+              <span className="text-xs text-muted">{stat.label}</span>
             </div>
           ))}
         </div>
       </section>
 
-      {/* ── How it works ──────────────────────────────────────────────────────── */}
-      <section className="py-20 max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="text-center mb-12">
-          <h2 className="memefi-h2 mb-3">How it Works</h2>
-          <p className="text-sm" style={{ color: 'var(--muted)' }}>Four steps from zero to earning</p>
-        </div>
-        <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-5">
-          {HOW_IT_WORKS.map(({ step, icon: Icon, title, desc }, i) => (
-            <motion.div
-              key={step}
-              initial={{ opacity: 0, y: 16 }}
-              whileInView={{ opacity: 1, y: 0 }}
-              viewport={{ once: true }}
-              transition={{ delay: i * 0.08 }}
-              className="mf-card flex flex-col gap-4"
-              style={{ padding: '24px', borderRadius: '20px' }}
-            >
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0"
-                  style={{ background: 'var(--card-2)' }}
-                >
-                  <Icon className="w-5 h-5" style={{ color: 'var(--green)' }} />
-                </div>
-                <span className="badge badge-muted">Step {step}</span>
-              </div>
-              <div>
-                <h3 className="memefi-h3 mb-1.5">{title}</h3>
-                <p className="text-xs leading-relaxed" style={{ color: 'var(--muted)' }}>{desc}</p>
-              </div>
-            </motion.div>
-          ))}
-        </div>
-      </section>
-
-      {/* ── Bot tiers ─────────────────────────────────────────────────────────── */}
-      <section style={{ background: 'var(--card)', borderTop: '1px solid var(--liner)', borderBottom: '1px solid var(--liner)' }} className="py-20">
-        <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="text-center mb-10">
-            <h2 className="memefi-h2 mb-3">Bot Tiers</h2>
-            <p className="text-sm" style={{ color: 'var(--muted)' }}>Upgrade your fleet for exponentially higher returns</p>
-          </div>
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
-            {[
-              { label: 'Basic',   icon: Bot,    color: '#9a8f81', rate: 1,   price: 0 },
-              { label: 'Bronze',  icon: Layers,  color: '#cd7f32', rate: 5,   price: 500 },
-              { label: 'Silver',  icon: Cpu,     color: '#5bb8ff', rate: 25,  price: 2000 },
-              { label: 'Gold',    icon: Star,    color: '#ffcf4d', rate: 100, price: 7500 },
-              { label: 'Diamond', icon: Gem,     color: '#9d7bff', rate: 500, price: 25000 },
-            ].map(({ label, icon: Icon, color, rate, price }, i) => (
-              <motion.div
-                key={label}
-                initial={{ opacity: 0, y: 12 }}
-                whileInView={{ opacity: 1, y: 0 }}
-                viewport={{ once: true }}
-                transition={{ delay: i * 0.06 }}
-                whileHover={{ y: -4 }}
-                className="mf-card-2 text-center cursor-default"
-                style={{ padding: '20px 14px', borderRadius: '20px', border: `1px solid ${color}20` }}
-              >
+      {/* Bot tier showcase */}
+      <section id="tiers" className="px-6 py-20">
+        <div className="mx-auto max-w-6xl">
+          <h2 className="text-center font-display text-3xl font-bold md:text-4xl">
+            Choose Your <span className="text-gold">Bot Tier</span>
+          </h2>
+          <p className="mx-auto mt-4 max-w-xl text-center text-muted">
+            Higher tiers earn more points per day and unlock exclusive
+            marketplace features.
+          </p>
+          <div className="mt-12 grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+            {tiers.map((tier) => {
+              const meta = TIER_META[tier];
+              const info = tierInfo?.[tier];
+              return (
                 <div
-                  className="w-10 h-10 rounded-xl flex items-center justify-center mx-auto mb-3"
-                  style={{ background: `${color}12` }}
+                  key={tier}
+                  className="mf-card flex flex-col items-center gap-3 text-center"
                 >
-                  <Icon className="w-5 h-5" style={{ color }} />
+                  <span className="text-4xl">{meta.emoji}</span>
+                  <h3 className={`font-display text-lg font-bold ${meta.color}`}>
+                    {tier}
+                  </h3>
+                  <p className="text-sm text-muted">
+                    {info ? `${info.rate}x` : "—"} accrual rate
+                  </p>
+                  <p className="font-display text-xl font-bold text-text">
+                    {!info
+                      ? "—"
+                      : info.price === 0n
+                        ? "Free"
+                        : `${stroopsToXlmString(info.price)} XLM`}
+                  </p>
                 </div>
-                <div className="text-xs font-black uppercase tracking-wider mb-2" style={{ fontFamily: "'Sora', sans-serif", color }}>
-                  {label}
-                </div>
-                <div className="font-black mb-0.5" style={{ fontFamily: "'Sora', sans-serif", fontSize: '22px', color: price === 0 ? 'var(--text)' : 'var(--gold)', lineHeight: 1 }}>
-                  {rate}
-                </div>
-                <div className="text-xs mb-3" style={{ color: 'var(--muted)' }}>pts/hour</div>
-                <div className="text-xs font-bold pt-2.5" style={{ borderTop: '1px solid var(--liner)', color: price === 0 ? 'var(--green)' : 'var(--gold)' }}>
-                  {price === 0 ? 'FREE' : `${price.toLocaleString()} XLM`}
-                </div>
-              </motion.div>
-            ))}
+              );
+            })}
           </div>
         </div>
       </section>
 
-      {/* ── Features ──────────────────────────────────────────────────────────── */}
-      <section className="py-20 max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="grid md:grid-cols-2 gap-14 items-center">
-          <div>
-            <h2 className="memefi-h2 mb-5">Built for the Stellar Ecosystem</h2>
-            <p className="mb-7 text-sm" style={{ color: 'var(--muted)', lineHeight: 1.8 }}>
-              AutoMint uses Soroban smart contracts and Stellar's near-zero fees to make idle gaming economically viable — even for micro-rewards.
-            </p>
-            <ul className="space-y-2.5">
-              {FEATURES.map((f) => (
-                <li key={f} className="flex items-start gap-2.5 text-sm">
-                  <div className="w-4 h-4 rounded-full flex items-center justify-center shrink-0 mt-0.5"
-                    style={{ background: 'rgba(52,224,138,0.12)' }}
-                  >
-                    <Check className="w-2.5 h-2.5" style={{ color: 'var(--green)' }} />
-                  </div>
-                  <span style={{ color: 'var(--text)' }}>{f}</span>
-                </li>
-              ))}
-            </ul>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            {[
-              { icon: Bot,         label: 'NFT Bots',     desc: 'Tradeable on-chain assets',   color: 'var(--green)' },
-              { icon: Zap,         label: 'Auto-Accrual', desc: '24/7 passive point earning',  color: 'var(--gold)' },
-              { icon: ShoppingBag, label: 'Marketplace',  desc: 'P2P bot trading with escrow', color: 'var(--purple)' },
-              { icon: Lock,        label: 'Non-Custodial',desc: 'Your keys, your bots, always',color: 'var(--blue)' },
-            ].map(({ icon: Icon, label, desc, color }) => (
-              <div key={label} className="mf-card" style={{ padding: '20px', borderRadius: '18px' }}>
-                <div className="w-9 h-9 rounded-xl flex items-center justify-center mb-3" style={{ background: `${color}14` }}>
-                  <Icon className="w-4 h-4" style={{ color }} />
-                </div>
-                <div className="font-bold text-xs mb-1 uppercase tracking-wide" style={{ color: 'var(--text)', fontFamily: "'Sora', sans-serif" }}>{label}</div>
-                <div className="text-xs" style={{ color: 'var(--muted)' }}>{desc}</div>
+      {/* How it works */}
+      <section className="border-t border-liner bg-card px-6 py-20">
+        <div className="mx-auto max-w-5xl">
+          <h2 className="text-center font-display text-3xl font-bold md:text-4xl">
+            How It <span className="text-purple">Works</span>
+          </h2>
+          <div className="mt-12 grid gap-8 md:grid-cols-4">
+            {steps.map((s) => (
+              <div key={s.step} className="flex flex-col items-center gap-3 text-center">
+                <span className="flex h-12 w-12 items-center justify-center rounded-full bg-gold/10 font-display text-lg font-bold text-gold">
+                  {s.step}
+                </span>
+                <h3 className="font-display text-lg font-bold text-text">
+                  {s.title}
+                </h3>
+                <p className="text-sm text-muted">{s.description}</p>
               </div>
             ))}
           </div>
         </div>
       </section>
 
-      {/* ── CTA ───────────────────────────────────────────────────────────────── */}
-      <section className="pb-24 max-w-5xl mx-auto px-4">
-        <div
-          className="rounded-3xl p-10 sm:p-14 text-center relative overflow-hidden"
-          style={{ background: 'var(--card)' }}
-        >
-          <div
-            className="absolute inset-0 pointer-events-none"
-            style={{ background: 'radial-gradient(ellipse 60% 60% at 50% 100%, rgba(255,207,77,0.07) 0%, transparent 100%)' }}
-          />
-          <div className="relative">
-            <h2 className="memefi-h2 mb-3">
-              Ready to Start{' '}
-              <span style={{ color: 'var(--gold)' }}>Earning?</span>
-            </h2>
-            <p className="mb-8 max-w-md mx-auto text-sm" style={{ color: 'var(--muted)', lineHeight: 1.7 }}>
-              Connect your Freighter wallet and claim your free Basic Bot in under 60 seconds.
-            </p>
-            {isConnected ? (
-              <Link href="/dashboard">
-                <button className="btn-primary">
-                  Open Dashboard <ArrowRight className="w-4 h-4" />
-                </button>
-              </Link>
-            ) : (
-              <button onClick={connect} className="btn-primary">
-                Get Started — It&apos;s Free
-              </button>
-            )}
+      {/* Features */}
+      <section className="px-6 py-20">
+        <div className="mx-auto max-w-5xl">
+          <h2 className="text-center font-display text-3xl font-bold md:text-4xl">
+            Built for <span className="text-green">Performance</span>
+          </h2>
+          <div className="mt-12 grid gap-6 sm:grid-cols-2">
+            {features.map((f) => (
+              <div key={f.title} className="mf-card flex gap-4">
+                <f.icon className="mt-1 h-6 w-6 shrink-0 text-gold" />
+                <div>
+                  <h3 className="font-display text-base font-bold text-text">
+                    {f.title}
+                  </h3>
+                  <p className="mt-1 text-sm text-muted">{f.description}</p>
+                </div>
+              </div>
+            ))}
           </div>
         </div>
       </section>
 
+      {/* CTA */}
+      <section className="border-t border-liner bg-card px-6 py-20">
+        <div className="mx-auto max-w-2xl text-center">
+          <h2 className="font-display text-3xl font-bold md:text-4xl">
+            Ready to <span className="text-gold">Mint</span>?
+          </h2>
+          <p className="mt-4 text-muted">
+            Join thousands of users earning points with AI bot NFTs on Stellar.
+          </p>
+          <Link href="/dashboard" className="btn-primary mt-8 inline-flex text-base">
+            Get Started <ArrowRight className="h-4 w-4" />
+          </Link>
+        </div>
+      </section>
     </div>
   );
 }

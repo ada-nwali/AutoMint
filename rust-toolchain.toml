@@ -1,0 +1,18 @@
+# Pinned toolchain for reproducible Soroban wasm builds (#559).
+#
+# Why a *concrete* channel rather than "stable"? A floating channel silently
+# changes rustc over time and breaks the "two builds of the same commit produce
+# byte-identical wasm hashes" guarantee that scripts/verify-deployment.sh and
+# the deployment manifest rely on. This version (1.95.0) is the toolchain
+# against which the `wasm_hash` values recorded in deployments/<network>.json
+# were produced, and is consistent with the exact `soroban-sdk = "=21.7.7"`
+# pin in Cargo.toml.
+#
+# Bumping this file is a deliberate, reviewable action: after changing it,
+# rebuild every contract, and re-record each contract's `wasm_hash` in the
+# deployment manifest before redeploying. See docs/DEPENDENCIES.md and
+# docs/DEPLOYMENT.md for the full reproducible-build workflow.
+[toolchain]
+channel = "1.95.0"
+components = ["rustfmt", "clippy"]
+targets = ["wasm32v1-none"]

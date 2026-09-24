@@ -6,10 +6,37 @@ members = [
     "contracts/accrual",
     "contracts/marketplace",
     "contracts/token",
+    "contracts/testutils",
 ]
 
+[workspace.package]
+license = "Apache-2.0"
+
 [workspace.dependencies]
-soroban-sdk = { version = "21", default-features = false }
+# `soroban-sdk` is pinned to an EXACT patch version (no leading `^`, no bare
+# major/minor) so a routine `cargo update` can never silently move it to a newer
+# 21.x patch. Soroban SDK patch releases have changed storage and auth semantics
+# before, and an unreviewed bump would silently break the byte-identical wasm
+# guarantee required by the reproducible-build checks (#559) and the wasm-hash
+# recorded in the deployment manifest (#557/#559). See docs/DEPENDENCIES.md.
+#
+# `default-features = false` keeps the on-chain wasm lean: it disables the SDK's
+# default feature set (which is geared toward the host/std and test tooling) so
+# production contracts ship without any test-only code. The `testutils` feature —
+# which pulls in heavy, non-wasm-safe helpers (mock auth, ledger mocking, event
+# capture) — is enabled ONLY in test/dev contexts:
+#   * each contract crate exposes its own `testutils` feature
+#     (`[features] testutils = ["soroban-sdk/testutils"]`) and turns it on via
+#     `[dev-dependencies]`;
+#   * the shared `contracts/testutils` crate enables it in its regular
+#     `[dependencies]` because that crate is ITSELF only ever referenced as a
+#     `[dev-dependency]` of the contract crates.
+# A production dependency resolution (no `--tests`/`--dev`) therefore never
+# enables `testutils`, so it can never leak into a deployed wasm.
+soroban-sdk = { version = "=21.7.7", default-features = false }
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
 
 [profile.release]
 opt-level = "z"

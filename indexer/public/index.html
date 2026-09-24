@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AutoMint Ops Dashboard</title>
+  <style>
+    :root {
+      --bg: #0d1117; --card: #161b22; --border: #30363d; --fg: #e6edf3;
+      --muted: #8b949e; --accent: #58a6ff; --green: #3fb950; --amber: #d29922;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--fg);
+           font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    header { padding: 18px 24px; border-bottom: 1px solid var(--border); }
+    header h1 { margin: 0; font-size: 18px; }
+    header .sub { color: var(--muted); font-size: 12px; margin-top: 4px; }
+    main { padding: 24px; max-width: 1200px; margin: 0 auto; }
+    .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+             gap: 14px; margin-bottom: 24px; }
+    .card { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 14px; }
+    .card .label { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; }
+    .card .value { font-size: 22px; margin-top: 6px; font-weight: 600; }
+    .card .value.small { font-size: 15px; }
+    section { background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+              margin-bottom: 24px; overflow: hidden; }
+    section h2 { font-size: 13px; margin: 0; padding: 12px 14px; border-bottom: 1px solid var(--border);
+                 text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    th, td { text-align: left; padding: 8px 14px; border-bottom: 1px solid var(--border); }
+    th { color: var(--muted); font-weight: 500; }
+    tr:last-child td { border-bottom: none; }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px;
+             border: 1px solid var(--border); color: var(--muted); }
+    .badge.ok { color: var(--green); border-color: var(--green); }
+    .badge.warn { color: var(--amber); border-color: var(--amber); }
+    .stale { color: var(--amber); }
+    .err { color: #f85149; }
+    #statusline { color: var(--muted); font-size: 12px; margin-bottom: 14px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>AutoMint Ops Dashboard <span class="badge" id="netbadge">…</span></h1>
+    <div class="sub" id="subline">Loading…</div>
+  </header>
+  <main>
+    <div id="statusline"></div>
+    <div class="cards" id="cards"></div>
+    <section>
+      <h2>Daily activity (last 30 days)</h2>
+      <div style="overflow-x:auto"><table id="daily">
+        <thead><tr><th>Day</th><th>Claims</th><th>AMT minted</th><th>Volume</th></tr></thead>
+        <tbody></tbody>
+      </table></div>
+    </section>
+    <section>
+      <h2>Recent events</h2>
+      <div style="overflow-x:auto"><table id="events">
+        <thead><tr><th>Ledger</th><th>Contract</th><th>Event</th><th>Topics</th><th>Data</th></tr></thead>
+        <tbody></tbody>
+      </table></div>
+    </section>
+  </main>
+  <script>
+    const fmt = (v) => v ?? "—";
+    const $ = (id) => document.getElementById(id);
+
+    async function refresh() {
+      try {
+        const [summary, daily, events, health] = await Promise.all([
+          fetch("/api/summary").then(r => r.json()),
+          fetch("/api/claims/daily?days=30").then(r => r.json()),
+          fetch("/api/events?limit=25").then(r => r.json()),
+          fetch("/api/health").then(r => r.json()),
+        ]);
+        renderCards(summary);
+        renderDaily(daily.rows);
+        renderEvents(events.events);
+        $("netbadge").textContent = summary.latest_ledger > 0
+          ? (health.network || "unknown") : (health.network || "unknown");
+        $("subline").textContent =
+          `checkpoint ledger: ${fmt(health.checkpoint_ledger)} · last indexed: ${fmt(health.last_indexed_at)}`;
+        const age = summary.last_indexed_at ? (Date.now() - Date.parse(summary.last_indexed_at)) / 1000 : Infinity;
+        $("statusline").innerHTML = age < 600
+          ? `<span class="ok">●</span> indexer healthy (lag &lt; 10 min)`
+          : `<span class="stale">●</span> indexer stale or idle (no events yet)`;
+      } catch (e) {
+        $("statusline").innerHTML = `<span class="err">●</span> failed to reach indexer API: ${e.message}`;
+      }
+    }
+
+    function renderCards(s) {
+      const cards = [
+        ["Users", fmt(s.users)],
+        ["Claims", fmt(s.total_claims)],
+        ["AMT minted", fmt(s.amt_minted), true],
+        ["Volume", fmt(s.volume), true],
+        ["Floor price", fmt(s.floor_price), true],
+        ["Active listings", fmt(s.active_listings)],
+        ["Latest ledger", fmt(s.latest_ledger)],
+      ];
+      $("cards").innerHTML = cards.map(([label, value, small]) =>
+        `<div class="card"><div class="label">${label}</div><div class="value${small ? " small" : ""}">${value}</div></div>`
+      ).join("");
+    }
+
+    function renderDaily(rows) {
+      $("daily").querySelector("tbody").innerHTML = rows.map(r =>
+        `<tr><td>${r.day}</td><td>${r.claims}</td><td>${r.amt_minted}</td><td>${r.volume}</td></tr>`
+      ).join("");
+    }
+
+    function renderEvents(events) {
+      $("events").querySelector("tbody").innerHTML = events.map(e =>
+        `<tr>
+          <td>${e.ledger}</td>
+          <td><span class="badge">${e.contract}</span></td>
+          <td>${e.event}</td>
+          <td title="${escapeHtml(e.topics_json)}">${escapeHtml(shorten(e.topics_json, 60))}</td>
+          <td title="${escapeHtml(e.data_json)}">${escapeHtml(shorten(e.data_json, 60))}</td>
+        </tr>`
+      ).join("");
+    }
+
+    function shorten(s, n) { return s.length > n ? s.slice(0, n) + "…" : s; }
+    function escapeHtml(s) { return s.replace(/[&<>"]/g, c =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+
+    refresh();
+    setInterval(refresh, 15000);
+  </script>
+</body>
+</html>

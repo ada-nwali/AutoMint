@@ -1,274 +1,355 @@
-'use client';
-import { useState } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { Bot, RefreshCw, Loader2, AlertCircle, ArrowRight, Sparkles } from 'lucide-react';
-import Link from 'next/link';
-import { useWallet } from '@/hooks/useWallet';
-import { useAccrual } from '@/hooks/useAccrual';
-import { PointsCounter } from '@/components/dashboard/PointsCounter';
-import { ClaimButton } from '@/components/dashboard/ClaimButton';
-import { BotCard } from '@/components/dashboard/BotCard';
-import { ListBotModal } from '@/components/marketplace/ListBotModal';
-import { CardSkeleton, BotCardSkeleton } from '@/components/ui/Skeleton';
-import { useMarketplace } from '@/hooks/useMarketplace';
-import { TIER_META } from '@/types';
-import type { BotNFT } from '@/types';
+"use client";
+
+import { useWallet } from "@/hooks/useWallet";
+import {
+  useRegistered,
+  useProfile,
+  useBots,
+  useAccrualState,
+  useClaim,
+  useAmtBalance,
+  useAmtDecimals,
+} from "@/hooks/useAccrual";
+import { useAllBotDetails } from "@/hooks/useBotDetails";
+import { getPendingPoints } from "@/lib/contracts";
+import { useState, useEffect } from "react";
+import { Skeleton } from "@/components/ui/Skeleton";
+import { PointsCounter } from "@/components/dashboard/PointsCounter";
+import ClaimButton from "@/components/dashboard/ClaimButton";
+import BotCard from "@/components/dashboard/BotCard";
+import RegistrationBanner from "@/components/dashboard/RegistrationBanner";
+import UpgradePrompt from "@/components/dashboard/UpgradePrompt";
+import { ErrorState } from "@/components/ui/ErrorState";
+import { Wallet, Loader2, Bot } from "lucide-react";
+import clsx from "clsx";
+import type { BotNFT } from "@/types";
+import { useReduceMotion } from "@/hooks/useReduceMotion";
 
 export default function DashboardPage() {
-  const { isConnected, publicKey, connect, status } = useWallet();
+  const { publicKey, isConnected, connect, isConnecting } = useWallet();
   const {
-    profile, bots, accrualState, amtBalance, displayedPoints, ratePerHour,
-    isLoading, isClaiming, isRegistering, registered, claim, register, refetch,
-  } = useAccrual(publicKey);
+    data: isRegistered,
+    isLoading: isCheckingRegistration,
+    isError: isRegError,
+    error: regError,
+    refetch: refetchReg,
+    isRefetching: isRegRefetching,
+  } = useRegistered();
 
-  const { listBot, isListing } = useMarketplace(publicKey);
-  const [username, setUsername] = useState('');
-  const [listingBot, setListingBot] = useState<BotNFT | null>(null);
+  const {
+    data: profile,
+    isError: isProfileError,
+    error: profileError,
+    refetch: refetchProfile,
+    isRefetching: isProfileRefetching,
+  } = useProfile();
 
-  // ── Not connected ──────────────────────────────────────────────────────────
+  const {
+    data: botIds,
+    isError: isBotsError,
+    error: botsError,
+    refetch: refetchBots,
+    isRefetching: isBotsRefetching,
+  } = useBots();
+
+  const {
+    data: accrualState,
+    isError: isAccrualError,
+    error: accrualError,
+    refetch: refetchAccrual,
+    isRefetching: isAccrualRefetching,
+  } = useAccrualState();
+
+  const {
+    data: bots,
+    isError: isBotsDetailsError,
+    error: botsDetailsError,
+    refetch: refetchBotsDetails,
+    isRefetching: isBotsDetailsRefetching,
+  } = useAllBotDetails(botIds || []);
+
+  const { data: amtBalance, isPending: isAmtBalancePending } = useAmtBalance();
+  const { data: amtDecimals } = useAmtDecimals();
+  const claim = useClaim();
+
+  const [pendingPoints, setPendingPoints] = useState<bigint>(BigInt(0));
+
+  const reduceMotion = useReduceMotion();
+
+  const isAnyError = isRegError || isProfileError || isBotsError || isAccrualError || isBotsDetailsError;
+  const activeError = regError || profileError || botsError || accrualError || botsDetailsError;
+  const isRetrying = isRegRefetching || isProfileRefetching || isBotsRefetching || isBotsDetailsRefetching;
+
+  // Check if any query is loading
+  const isLoading =
+    isCheckingRegistration ||
+    isProfileRefetching ||
+    isBotsRefetching ||
+    isBotsDetailsRefetching ||
+    isAccrualRefetching ||
+    isAmtBalancePending;
+
+  const handleRetryAll = () => {
+    refetchReg();
+    refetchProfile();
+    refetchBots();
+    refetchAccrual();
+    refetchBotsDetails();
+  };
+
+  // Calculate total accrual rate from bots
+  const totalRate =
+    bots?.reduce(
+      (sum: number, bot: BotNFT) => sum + Number(bot.accrual_rate),
+      0,
+    ) || 0;
+
+  // Fetch pending points when connected
+  useEffect(() => {
+    if (publicKey && isRegistered) {
+      getPendingPoints(publicKey)
+        .then(setPendingPoints)
+        .catch(() => setPendingPoints(BigInt(0)));
+    }
+  }, [publicKey, isRegistered, accrualState]);
+
+  // Handle claim
+  const handleClaim = () => {
+    claim.mutate(undefined, {
+      onSuccess: () => {
+        setPendingPoints(BigInt(0));
+      },
+    });
+  };
+
+  // Not connected state
   if (!isConnected) {
     return (
-      <div className="max-w-md mx-auto px-4 py-24 text-center">
-        <div
-          className="w-20 h-20 rounded-3xl flex items-center justify-center mx-auto mb-6"
-          style={{ background: 'var(--card-2)' }}
-        >
-          <Bot className="w-9 h-9" style={{ color: 'var(--green)' }} />
+      <div className="mx-auto max-w-7xl px-6 py-8">
+        <div className="flex min-h-[400px] flex-col items-center justify-center rounded-2xl border border-liner bg-card p-12 text-center">
+          <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-card-2">
+            <Wallet className="h-8 w-8 text-muted" aria-hidden="true" />
+          </div>
+          <h2 className="mt-4 font-display text-2xl font-semibold text-text">
+            Connect Your Wallet
+          </h2>
+          <p className="mt-2 text-sm text-muted">
+            Connect your Freighter wallet to access your dashboard and manage your AI bot NFTs.
+          </p>
+          <button
+            onClick={connect}
+            disabled={isConnecting}
+            className={clsx(
+              "mt-6 flex items-center gap-2 rounded-xl bg-gold/10 px-6 py-3",
+              "text-sm font-medium text-gold border border-gold/30",
+              "transition-all hover:bg-gold/20 hover:border-gold/50",
+              "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+              "disabled:cursor-not-allowed disabled:opacity-50",
+            )}
+          >
+            {isConnecting ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                Connecting...
+              </>
+            ) : (
+              <>
+                <Wallet className="h-4 w-4" aria-hidden="true" />
+                Connect Wallet
+              </>
+            )}
+          </button>
         </div>
-        <h1 className="memefi-h2 mb-3">Your Dashboard</h1>
-        <p className="mb-10 text-sm" style={{ color: 'var(--muted)' }}>
-          Connect your Freighter wallet to view your bots, track points, and claim $AMT tokens.
-        </p>
-        <button
-          onClick={connect}
-          disabled={status === 'connecting'}
-          className="btn-primary mx-auto"
-        >
-          {status === 'connecting' ? 'Connecting…' : 'Connect Wallet'}
-        </button>
       </div>
     );
   }
 
-  // ── Loading ────────────────────────────────────────────────────────────────
+  // Loading state - show skeletons while queries are in flight
   if (isLoading) {
     return (
-      <div className="max-w-5xl mx-auto px-4 py-8 space-y-6">
-        <CardSkeleton />
-        <div className="grid sm:grid-cols-2 gap-4">
-          <CardSkeleton /><CardSkeleton />
+      <div
+        className="mx-auto max-w-7xl px-6 py-8"
+        role="status"
+        aria-busy="true"
+        aria-label="Loading dashboard"
+      >
+        <span className="sr-only">Loading dashboard...</span>
+
+        <div className="mb-8">
+          <Skeleton className="h-8 w-56" />
+          <Skeleton className="mt-3 h-4 w-72" />
         </div>
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-          {Array.from({ length: 3 }).map((_, i) => <BotCardSkeleton key={i} />)}
+
+        <div className="grid gap-6 lg:grid-cols-2">
+          {/* Left column — points, claim, upgrade */}
+          <div className="flex flex-col gap-6">
+            <div className="rounded-2xl border border-liner bg-card p-5">
+              <div className="flex items-center gap-3">
+                <Skeleton className="h-11 w-11 rounded-xl" />
+                <div className="flex flex-col gap-2">
+                  <Skeleton className="h-4 w-28" />
+                  <Skeleton className="h-3 w-16" />
+                </div>
+              </div>
+              <Skeleton className="mt-4 h-7 w-48" />
+              <div className="mt-4 grid grid-cols-2 gap-3">
+                <Skeleton className="h-14 rounded-lg" />
+                <Skeleton className="h-14 rounded-lg" />
+              </div>
+              <Skeleton className="mt-4 h-10 w-full rounded-xl" />
+            </div>
+            <Skeleton className="h-24 w-full rounded-2xl" />
+          </div>
+
+          {/* Right column — bot grid */}
+          <div className="flex flex-col gap-6">
+            <div className="flex items-center justify-between">
+              <Skeleton className="h-6 w-32" />
+              <Skeleton className="h-4 w-20" />
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Skeleton className="h-48 w-full rounded-2xl" />
+              <Skeleton className="h-48 w-full rounded-2xl" />
+            </div>
+          </div>
         </div>
       </div>
     );
   }
 
-  // ── Dashboard (registered + unregistered both land here) ──────────────────
-  const pendingPoints = accrualState
-    ? Math.max(0, Math.floor(((Date.now() / 1000 - Number(accrualState.lastClaimTs)) * ratePerHour) / 3600))
-    : 0;
-
-  return (
-    <div className="max-w-5xl mx-auto px-4 sm:px-6 py-8">
-
-      {/* ── Registration banner (shown only when not registered) ── */}
-      <AnimatePresence>
-        {!registered && (
-          <motion.div
-            key="register-banner"
-            initial={{ opacity: 0, y: -12 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -12 }}
-            transition={{ duration: 0.3 }}
-            className="mb-8 rounded-2xl p-6"
-            style={{
-              background: 'linear-gradient(135deg, rgba(52,224,138,0.08) 0%, rgba(52,224,138,0.04) 100%)',
-              border: '1px solid rgba(52,224,138,0.3)',
-            }}
-          >
-            <div className="flex items-start gap-4">
-              <div
-                className="shrink-0 w-11 h-11 rounded-2xl flex items-center justify-center"
-                style={{ background: 'rgba(52,224,138,0.15)' }}
-              >
-                <Sparkles className="w-5 h-5" style={{ color: 'var(--green)' }} />
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="font-bold text-sm mb-0.5" style={{ fontFamily: "'Sora', sans-serif", color: 'var(--text)' }}>
-                  Claim your free Basic Bot
-                </p>
-                <p className="text-xs mb-4" style={{ color: 'var(--muted)' }}>
-                  Pick a username to register on-chain and instantly start earning $AMT.
-                </p>
-                <div className="flex flex-col sm:flex-row gap-2">
-                  <input
-                    type="text"
-                    value={username}
-                    onChange={(e) => setUsername(e.target.value.slice(0, 32))}
-                    placeholder="Choose a username (max 32 chars)"
-                    className="flex-1 rounded-xl px-4 py-2.5 text-sm outline-none transition-all"
-                    style={{
-                      background: 'var(--card-2)',
-                      border: '1px solid var(--liner)',
-                      color: 'var(--text)',
-                    }}
-                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--green)')}
-                    onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--liner)')}
-                    onKeyDown={(e) => e.key === 'Enter' && username.trim() && !isRegistering && register(username.trim())}
-                  />
-                  <button
-                    onClick={() => username.trim() && register(username.trim())}
-                    disabled={isRegistering || !username.trim()}
-                    className="btn-primary shrink-0"
-                    style={{ whiteSpace: 'nowrap' }}
-                  >
-                    {isRegistering ? (
-                      <><Loader2 className="w-4 h-4 animate-spin" /> Registering…</>
-                    ) : (
-                      'Register & Start Mining'
-                    )}
-                  </button>
-                </div>
-              </div>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* ── Page header ───────────────────────────────────────────────────── */}
-      <div className="flex items-center justify-between mb-8">
-        <div>
-          <h1
-            className="font-black uppercase tracking-tight"
-            style={{ fontFamily: "'Sora', sans-serif", fontSize: '26px', color: 'var(--text)' }}
-          >
-            {registered
-              ? <>GM, <span style={{ color: 'var(--green)' }}>{profile?.username ?? 'Miner'}</span> 👋</>
-              : 'Your Dashboard'
-            }
-          </h1>
-          <p className="text-sm mt-0.5" style={{ color: 'var(--muted)' }}>
-            {registered
-              ? 'Your bots are mining 24/7 on Stellar'
-              : 'Register above to start earning $AMT'
-            }
-          </p>
-        </div>
-        <button
-          onClick={refetch}
-          aria-label="Refresh"
-          className="p-2 rounded-xl transition-colors"
-          style={{ border: '1px solid var(--liner)', color: 'var(--muted)', background: 'transparent' }}
-          onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--text)')}
-          onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--muted)')}
-        >
-          <RefreshCw className="w-4 h-4" />
-        </button>
-      </div>
-
-      {/* ── Main grid ─────────────────────────────────────────────────────── */}
-      <div className="grid lg:grid-cols-3 gap-6 mb-8">
-        <div className="lg:col-span-2">
-          <PointsCounter
-            displayedPoints={registered ? displayedPoints : 0}
-            ratePerHour={registered ? ratePerHour : 0}
-            bots={registered ? bots : []}
-            amtBalance={registered ? amtBalance : 0n}
-          />
-        </div>
-        <ClaimButton
-          pendingPoints={registered ? pendingPoints : 0}
-          isClaiming={isClaiming}
-          onClaim={claim}
-          disabled={!isConnected || !registered}
+  // Error state for registration or initial query failures
+  if (isRegError) {
+    return (
+      <div className="mx-auto max-w-7xl px-6 py-8">
+        <ErrorState
+          error={regError}
+          title="Failed to Load Account Status"
+          message="Could not verify your registration status with the Soroban registry contract."
+          onRetry={handleRetryAll}
+          isRetrying={isRetrying}
+          data-testid="dashboard-error-state"
         />
       </div>
+    );
+  }
 
-      {/* ── Bots section ──────────────────────────────────────────────────── */}
-      <div>
-        <div className="flex items-center justify-between mb-5">
-          <h2
-            className="font-black uppercase text-base tracking-wide"
-            style={{ fontFamily: "'Sora', sans-serif", color: 'var(--text)' }}
-          >
-            Your Bots{' '}
-            <span style={{ color: 'var(--muted)', fontWeight: 400, textTransform: 'none', fontSize: '13px' }}>
-              ({registered ? bots.length : 0})
-            </span>
-          </h2>
-          {registered && (
-            <Link href="/marketplace">
-              <button
-                className="text-xs font-semibold px-3 py-1.5 rounded-xl transition-all"
-                style={{ border: '1px solid rgba(52,224,138,0.35)', color: 'var(--green)', background: 'rgba(52,224,138,0.08)' }}
-              >
-                + Buy More
-              </button>
-            </Link>
-          )}
+  // Not registered state
+  if (!isRegistered) {
+    return (
+      <div className="mx-auto max-w-7xl px-6 py-8">
+        <div className="max-w-xl">
+          <h1 className="font-display text-3xl font-bold text-text sm:text-4xl">Dashboard</h1>
+          <p className="mt-2 text-sm text-muted">
+            Manage your AI bot NFTs and track your earnings.
+          </p>
+          <div className="mt-6">
+            <RegistrationBanner />
+          </div>
         </div>
+      </div>
+    );
+  }
 
-        {!registered ? (
-          <div className="rounded-2xl p-12 text-center" style={{ background: 'var(--card)' }}>
-            <Bot className="w-10 h-10 mx-auto mb-3" style={{ color: 'var(--muted)', opacity: 0.3 }} />
-            <p className="text-sm" style={{ color: 'var(--muted)' }}>
-              Register above to receive your free Basic Bot and start mining.
-            </p>
-          </div>
-        ) : bots.length === 0 ? (
-          <div className="rounded-2xl p-12 text-center" style={{ background: 'var(--card)' }}>
-            <AlertCircle className="w-10 h-10 mx-auto mb-3" style={{ color: 'var(--muted)', opacity: 0.4 }} />
-            <p className="text-sm" style={{ color: 'var(--muted)' }}>
-              No bots found. Visit the{' '}
-              <Link href="/marketplace" style={{ color: 'var(--green)' }}>Marketplace</Link>{' '}
-              to buy one.
-            </p>
-          </div>
-        ) : (
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
-            {bots.map((bot) => (
-              <BotCard key={String(bot.id)} bot={bot} onList={setListingBot} />
-            ))}
-          </div>
-        )}
+  // Registered state - show dashboard with error handling for sub-queries
+  return (
+    <div className="mx-auto max-w-7xl px-6 py-8">
+      <div className="mb-8">
+        <h1 className="font-display text-3xl font-bold text-text sm:text-4xl">
+          Welcome back, {profile?.username || "User"}!
+        </h1>
+        <p className="mt-2 text-sm text-muted">
+          Track your points and manage your AI bot collection.
+        </p>
       </div>
 
-      {/* ── Upgrade prompt ────────────────────────────────────────────────── */}
-      {registered && bots.length > 0 && ratePerHour < 500 && (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          className="mt-8 rounded-2xl p-5 flex flex-col sm:flex-row items-center justify-between gap-4"
-          style={{ background: 'var(--card-2)', border: '1px solid rgba(157,123,255,0.25)' }}
-        >
-          <div>
-            <p className="font-semibold text-sm" style={{ color: 'var(--text)', fontFamily: "'Sora', sans-serif" }}>
-              {TIER_META.Diamond.emoji} Boost with a Diamond Bot
-            </p>
-            <p className="text-xs mt-0.5" style={{ color: 'var(--muted)' }}>
-              Earn 500 pts/hr — the maximum accrual rate.
-            </p>
-          </div>
-          <Link href="/marketplace">
-            <button
-              className="shrink-0 flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-all"
-              style={{ background: 'rgba(157,123,255,0.15)', border: '1px solid rgba(157,123,255,0.4)', color: 'var(--purple)' }}
-            >
-              Browse Marketplace <ArrowRight className="w-4 h-4" />
-            </button>
-          </Link>
-        </motion.div>
+      {isAnyError && (
+        <div className="mb-6">
+          <ErrorState
+            error={activeError}
+            title="Partial Data Outage"
+            message="Some dashboard metrics could not be synchronized with the Stellar network."
+            onRetry={handleRetryAll}
+            isRetrying={isRetrying}
+            compact
+            data-testid="dashboard-suberror-state"
+          />
+        </div>
       )}
 
-      <ListBotModal
-        bot={listingBot}
-        isOpen={!!listingBot}
-        onClose={() => setListingBot(null)}
-        onList={listBot}
-        isListing={isListing}
-      />
+      <div className="grid gap-6 lg:grid-cols-2">
+        {/* Left column */}
+        <div className="flex flex-col gap-6">
+          {/* Points Counter */}
+          <PointsCounter
+            points={isLoading ? 0 : Number(profile?.points || BigInt(0))}
+            rate={isLoading ? 0 : totalRate}
+            bots={isLoading ? [] : bots || []}
+            amtBalance={isLoading ? BigInt(0) : amtBalance ?? BigInt(0)}
+            amtDecimals={amtDecimals}
+          />
+
+          {/* Claim Button */}
+          {pendingPoints > BigInt(0) && !isLoading && (
+            <ClaimButton
+              pendingPoints={pendingPoints}
+              onClaim={handleClaim}
+              isClaiming={claim.isPending}
+            />
+          )}
+
+          {/* Upgrade Prompt */}
+          <UpgradePrompt currentRate={totalRate} />
+        </div>
+
+        {/* Right column - Bot Grid */}
+        <div className="flex flex-col gap-6">
+          <div className="flex items-center justify-between">
+            <h2 className="font-display text-lg font-semibold text-text">Your Bots</h2>
+            <span className="text-sm text-muted">{isLoading ? "loading..." : bots?.length || 0} owned</span>
+          </div>
+
+          {isBotsError || isBotsDetailsError ? (
+            <ErrorState
+              error={botsError || botsDetailsError}
+              title="Failed to Load Bots"
+              message="Could not retrieve your NFT bots from the contract."
+              onRetry={() => {
+                refetchBots();
+                refetchBotsDetails();
+              }}
+              isRetrying={isBotsRefetching || isBotsDetailsRefetching}
+              compact
+              data-testid="bots-error-state"
+            />
+          ) : isLoading ? (
+            <div className="rounded-2xl border border-liner bg-card p-5">
+              <div className="flex items-center gap-3">
+                <Skeleton className="h-11 w-11 rounded-xl" />
+                <div className="flex flex-col gap-2">
+                  <Skeleton className="h-4 w-28" />
+                  <Skeleton className="h-3 w-16" />
+                </div>
+              </div>
+              <Skeleton className="mt-4 h-6 w-16 rounded-full" />
+            </div>
+          ) : bots && bots.length > 0 ? (
+            <div className="grid gap-4 sm:grid-cols-2">
+              {bots.map((bot: BotNFT) => (
+                <BotCard key={bot.id.toString()} bot={bot} />
+              ))}
+            </div>
+          ) : (
+            <div className="flex min-h-[200px] flex-col items-center justify-center rounded-2xl border border-liner bg-card p-8 text-center">
+              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-card-2">
+                <Bot className="h-6 w-6 text-muted" aria-hidden="true" />
+              </div>
+              <p className="mt-3 text-sm text-muted">
+                No bots yet. Visit the marketplace to get started!
+              </p>
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

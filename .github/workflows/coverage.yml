@@ -1,0 +1,94 @@
+name: Coverage
+
+on:
+  pull_request:
+    branches: [testnet-implementation, main]
+    paths:
+      - "contracts/**"
+      - ".github/workflows/coverage.yml"
+  push:
+    branches: [testnet-implementation, main]
+    paths:
+      - "contracts/**"
+      - ".github/workflows/coverage.yml"
+
+jobs:
+  coverage:
+    name: LLVM-cov coverage report
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+
+      - name: Generate lcov report
+        run: cargo llvm-cov --workspace --lcov --output-path lcov.info
+
+      - name: Generate HTML report
+        run: cargo llvm-cov --workspace --html
+
+      - name: Upload lcov artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-lcov
+          path: lcov.info
+          retention-days: 30
+
+      - name: Upload HTML report artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-html
+          path: target/llvm-cov/html/
+          retention-days: 14
+
+      - name: Per-crate coverage summary
+        run: |
+          echo "## Per-crate coverage" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Crate | Coverage |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|----------|" >> $GITHUB_STEP_SUMMARY
+          for crate in accrual bot_nft marketplace registry token; do
+            pct=$(cargo llvm-cov --package "automint-$crate" --lcov /dev/null 2>&1 | grep -oP '\d+\.\d+%' | tail -1 || echo "N/A")
+            echo "| automint-$crate | $pct |" >> $GITHUB_STEP_SUMMARY
+          done
+
+      - name: Check minimum coverage threshold
+        run: |
+          # Per-crate minimum coverage thresholds.
+          # These start at conservative levels and should be ratcheted up
+          # as test coverage improves.
+          declare -A THRESHOLDS=(
+            [accrual]=60
+            [bot_nft]=60
+            [marketplace]=60
+            [registry]=60
+            [token]=60
+          )
+          FAILED=0
+          for crate in "${!THRESHOLDS[@]}"; do
+            threshold=${THRESHOLDS[$crate]}
+            # Extract coverage percentage for this crate
+            pct=$(cargo llvm-cov --package "automint-$crate" --lcov /dev/null 2>&1 | grep -oP '^\d+\.\d+' | tail -1 || echo "0")
+            if [ -z "$pct" ]; then
+              pct=0
+            fi
+            # Compare using awk since bash doesn't do float comparison
+            below=$(awk "BEGIN { print ($pct < $threshold) ? 1 : 0 }")
+            if [ "$below" -eq 1 ]; then
+              echo "FAIL: automint-$crate coverage $pct% is below threshold $threshold%"
+              FAILED=1
+            else
+              echo "OK: automint-$crate coverage $pct% meets threshold $threshold%"
+            fi
+          done
+          if [ "$FAILED" -eq 1 ]; then
+            echo ""
+            echo "One or more crates are below their coverage threshold."
+            echo "Add tests or raise the threshold intentionally in .github/workflows/coverage.yml"
+            exit 1
+          fi

@@ -1,0 +1,47 @@
+# AutoMint Code Owners File
+# See https://help.github.com/articles/about-code-owners/ for details.
+#
+# Code owners are automatically requested for review when PRs modify files
+# they own. This ensures contract changes get reviewed by contract experts
+# and frontend changes get reviewed by frontend experts.
+
+# Default global owners for the repository
+* @Alaka-ibr
+
+# Smart contracts (Rust / Soroban) - require contract expertise
+/contracts/ @Alaka-ibr
+/contracts/registry/ @Alaka-ibr
+/contracts/bot_nft/ @Alaka-ibr
+/contracts/accrual/ @Alaka-ibr
+/contracts/marketplace/ @Alaka-ibr
+/contracts/token/ @Alaka-ibr
+*.rs @Alaka-ibr
+Cargo.toml @Alaka-ibr
+Cargo.lock @Alaka-ibr
+
+# Frontend application (Next.js / React / TypeScript) - require frontend expertise
+/frontend/ @Alaka-ibr
+/frontend/src/ @Alaka-ibr
+*.tsx @Alaka-ibr
+*.ts @Alaka-ibr
+*.jsx @Alaka-ibr
+*.js @Alaka-ibr
+package.json @Alaka-ibr
+package-lock.json @Alaka-ibr
+
+# GitHub Actions workflows & CI configuration - require DevOps review
+/.github/workflows/ @Alaka-ibr
+/.github/ @Alaka-ibr
+docker-compose.yml @Alaka-ibr
+Dockerfile @Alaka-ibr
+
+# Core documentation & Architecture Decision Records - require architect review
+/docs/ @Alaka-ibr
+/docs/adr/ @Alaka-ibr
+README.md @Alaka-ibr
+CONTRIBUTING.md @Alaka-ibr
+SECURITY.md @Alaka-ibr
+
+# Deployment & scripts - require DevOps + contract expertise
+/scripts/ @Alaka-ibr
+/scripts/deploy.sh @Alaka-ibr

@@ -1,0 +1,16 @@
+[package]
+name = "automint-testutils"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+soroban-sdk = { version = "=21.7.7", features = ["testutils"] }
+automint-accrual = { path = "../accrual", features = ["testutils"] }
+automint-bot-nft = { path = "../bot_nft", features = ["testutils"] }
+automint-marketplace = { path = "../marketplace", features = ["testutils"] }
+automint-registry = { path = "../registry", features = ["testutils"] }
+automint-token = { path = "../token", features = ["testutils"] }

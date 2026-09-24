@@ -2,214 +2,119 @@
 @tailwind components;
 @tailwind utilities;
 
-@import url('https://fonts.googleapis.com/css2?family=Sora:wght@400;500;700;800&family=Inter:wght@400;500;600;700&display=swap');
+/* ── MemeFi Design System ─────────────────────────────────────────────────── */
 
-/* ── MemeFi design tokens ─────────────────────────────────────────────────── */
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Sora:wght@600;700;800&display=swap");
+
 :root {
-  --bg:           #050403;
-  --card:         #140f0a;
-  --card-2:       #1f1812;
-  --liner:        rgba(255, 255, 255, 0.07);
-  --text:         #f4f1ec;
-  --muted:        #9a8f81;
-  --stroke-brown: rgb(138, 100, 66);
-  --green:        #34e08a;
-  --gold:         #ffcf4d;
-  --purple:       #9d7bff;
-  --pink:         #ff6fae;
-  --blue:         #5bb8ff;
+  /* Warm dark palette */
+  --memefi-color-bg: #050403;
+  --memefi-color-card: #140f0a;
+  --memefi-color-card-2: #1f1812;
+  --memefi-color-liner: rgba(255, 255, 255, 0.07);
+  --memefi-color-text: #f4f1ec;
+  --memefi-color-muted: #9a8f81;
+  --memefi-color-green: #34e08a;
+  --memefi-color-gold: #ffcf4d;
+  --memefi-color-purple: #9d7bff;
+  --memefi-color-pink: #ff6fae;
+  --memefi-color-blue: #5bb8ff;
+
+  /* Tier colors */
+  --memefi-tier-basic: #6b7280;
+  --memefi-tier-bronze: #cd7f32;
+  --memefi-tier-silver: #c0c0c0;
+  --memefi-tier-gold: #ffd700;
+  --memefi-tier-diamond: #b9f2ff;
+
+  /* Fonts */
+  --memefi-font-display: "Sora", system-ui, sans-serif;
+  --memefi-font-sans: "Inter", system-ui, sans-serif;
+
+  /* Hero glow */
+  --memefi-hero-glow-start: rgba(255, 207, 77, 0.07);
+  --memefi-hero-glow-mid: rgba(157, 123, 255, 0.05);
 }
 
-* { box-sizing: border-box; }
+/* ── Base reset ───────────────────────────────────────────────────────────── */
 
-html { scroll-behavior: smooth; }
+* {
+  box-sizing: border-box;
+}
+
+html {
+  min-height: 100%;
+  background: var(--memefi-color-bg);
+}
 
 body {
-  background: var(--bg);
-  color: var(--text);
-  font-family: 'Inter', sans-serif;
-  font-size: 14px;
-  line-height: 1.5;
-  font-weight: 400;
+  min-height: 100vh;
+  margin: 0;
+  background: var(--memefi-color-bg);
+  color: var(--memefi-color-text);
+  font-family: var(--memefi-font-sans);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* ── Typography utilities ──────────────────────────────────────────────────── */
-
-/* Signature heading style — brown stroke + warm white fill */
-.memefi-h1 {
-  font-family: 'Sora', 'Archivo Black', sans-serif;
-  font-size: clamp(32px, 5vw, 58px);
-  font-weight: 800;
-  line-height: 1.0;
-  letter-spacing: -0.4px;
-  text-transform: uppercase;
-  color: var(--text);
-  -webkit-text-stroke: 1px var(--stroke-brown);
-  paint-order: stroke fill;
+a {
+  color: inherit;
+  text-decoration: none;
 }
 
-.memefi-h2 {
-  font-family: 'Sora', 'Archivo Black', sans-serif;
-  font-size: clamp(22px, 3vw, 36px);
-  font-weight: 800;
-  line-height: 1.05;
-  letter-spacing: -0.4px;
-  text-transform: uppercase;
-  color: var(--text);
-  -webkit-text-stroke: 1px var(--stroke-brown);
-  paint-order: stroke fill;
+/* ── Typography scale ─────────────────────────────────────────────────────── */
+
+.font-display {
+  font-family: var(--memefi-font-display);
 }
 
-.memefi-h3 {
-  font-family: 'Sora', sans-serif;
-  font-size: 16px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: -0.2px;
-  color: var(--text);
-}
+/* ── Utility classes ──────────────────────────────────────────────────────── */
 
-/* Big numeric display — balances, stats */
-.stat-num {
-  font-family: 'Sora', sans-serif;
-  font-weight: 800;
-  font-size: clamp(36px, 5vw, 52px);
-  line-height: 1;
-  letter-spacing: -1px;
-  font-variant-numeric: tabular-nums;
-}
-
-.stat-num-sm {
-  font-family: 'Sora', sans-serif;
-  font-weight: 800;
-  font-size: 24px;
-  line-height: 1;
-  letter-spacing: -0.5px;
-  font-variant-numeric: tabular-nums;
-}
-
-/* ── Surface components ────────────────────────────────────────────────────── */
-
-.mf-card {
-  background: var(--card);
-  border-radius: 20px;
-  padding: 32px;
-}
-
-.mf-card-2 {
-  background: var(--card-2);
-  border-radius: 16px;
-  padding: 24px;
-}
-
-.mf-liner {
-  border: 1px solid var(--liner);
-}
-
-/* ── Button system ─────────────────────────────────────────────────────────── */
-
+/* Primary button */
 .btn-primary {
-  background: var(--green);
-  color: #062b18;
-  font-family: 'Sora', sans-serif;
-  font-weight: 700;
-  font-size: 13px;
-  border-radius: 14px;
-  padding: 11px 22px;
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  border: none;
-  cursor: pointer;
-  transition: filter 0.15s, transform 0.1s;
-}
-.btn-primary:hover  { filter: brightness(1.1); }
-.btn-primary:active { transform: scale(0.97); }
-.btn-primary:disabled { opacity: 0.45; cursor: not-allowed; filter: none; }
-
-.btn-ghost {
-  background: transparent;
-  color: var(--muted);
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1.5rem;
   font-weight: 600;
-  font-size: 14px;
-  border-radius: 12px;
-  padding: 10px 18px;
-  border: 1px solid var(--liner);
+  font-size: 0.875rem;
+  border-radius: 0.75rem;
+  border: 1px solid rgba(255, 207, 77, 0.3);
+  background: rgba(255, 207, 77, 0.1);
+  color: var(--memefi-color-gold);
+  transition: all 150ms ease;
   cursor: pointer;
-  transition: color 0.15s, border-color 0.15s;
 }
-.btn-ghost:hover { color: var(--text); border-color: rgba(255,255,255,0.18); }
 
-/* ── Badge / pill ──────────────────────────────────────────────────────────── */
+.btn-primary:hover {
+  background: rgba(255, 207, 77, 0.2);
+  border-color: rgba(255, 207, 77, 0.5);
+}
 
+.btn-primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Card */
+.mf-card {
+  background: var(--memefi-color-card);
+  border: 1px solid var(--memefi-color-liner);
+  border-radius: 1rem;
+  padding: 1.5rem;
+}
+
+/* Badge */
 .badge {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  padding: 3px 10px;
-  border-radius: 8px;
-  font-size: 11px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.3px;
-}
-
-.badge-green  { background: rgba(52, 224, 138, 0.14); color: var(--green); }
-.badge-gold   { background: rgba(255, 207, 77,  0.14); color: var(--gold); }
-.badge-purple { background: rgba(157, 123, 255, 0.14); color: var(--purple); }
-.badge-blue   { background: rgba(91, 184, 255,  0.14); color: var(--blue); }
-.badge-pink   { background: rgba(255, 111, 174, 0.14); color: var(--pink); }
-.badge-muted  { background: rgba(154, 143, 129, 0.12); color: var(--muted); }
-
-/* ── Scrollbar ─────────────────────────────────────────────────────────────── */
-::-webkit-scrollbar { width: 5px; }
-::-webkit-scrollbar-track { background: var(--bg); }
-::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.18); }
-
-/* ── Warm glow effects ─────────────────────────────────────────────────────── */
-
-.glow-gold   { box-shadow: 0 0 40px rgba(255, 207, 77,  0.18); }
-.glow-green  { box-shadow: 0 0 40px rgba(52, 224, 138,  0.18); }
-.glow-purple { box-shadow: 0 0 40px rgba(157, 123, 255, 0.18); }
-
-/* ── Bot card hover ─────────────────────────────────────────────────────────── */
-.bot-card {
-  transition: transform 0.18s ease, box-shadow 0.18s ease;
-}
-.bot-card:hover {
-  transform: translateY(-3px);
-  box-shadow: 0 16px 32px rgba(0, 0, 0, 0.5);
-}
-
-/* ── Counter digit ─────────────────────────────────────────────────────────── */
-.counter-digit {
-  display: inline-block;
-  font-variant-numeric: tabular-nums;
-  font-family: 'Sora', sans-serif;
-  font-weight: 800;
-}
-
-/* ── Hero radial glow ──────────────────────────────────────────────────────── */
-.hero-glow {
-  background: radial-gradient(
-    ellipse 80% 60% at 50% 0%,
-    rgba(255, 207, 77, 0.07) 0%,
-    rgba(157, 123, 255, 0.05) 50%,
-    transparent 100%
-  );
-}
-
-/* ── Pulse animation ───────────────────────────────────────────────────────── */
-@keyframes pulse-slow {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.4; }
-}
-.pulse-dot { animation: pulse-slow 2s ease-in-out infinite; }
-
-@keyframes float {
-  0%, 100% { transform: translateY(0px); }
-  50% { transform: translateY(-10px); }
+  gap: 0.25rem;
+  padding: 0.25rem 0.625rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  border-radius: 9999px;
+  border: 1px solid var(--memefi-color-liner);
+  background: var(--memefi-color-card-2);
+  color: var(--memefi-color-muted);
 }

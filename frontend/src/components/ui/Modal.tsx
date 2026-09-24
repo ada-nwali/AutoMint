@@ -1,77 +1,87 @@
-'use client';
-import { useEffect } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { X } from 'lucide-react';
-import clsx from 'clsx';
+"use client";
+
+import { useEffect, useRef, useCallback } from "react";
+import { createPortal } from "react-dom";
+import { motion, AnimatePresence } from "framer-motion";
+import { X } from "lucide-react";
+import clsx from "clsx";
+import { useFocusLock } from "@/hooks/useFocusLock";
 
 interface ModalProps {
   isOpen: boolean;
   onClose: () => void;
-  title: string;
+  title?: string;
+  description?: string;
   children: React.ReactNode;
-  className?: string;
 }
 
-export function Modal({ isOpen, onClose, title, children, className }: ModalProps) {
-  useEffect(() => {
-    document.body.style.overflow = isOpen ? 'hidden' : '';
-    return () => { document.body.style.overflow = ''; };
-  }, [isOpen]);
+export default function Modal({ isOpen, onClose, title, description, children }: ModalProps) {
+  const overlayRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const descId = description ? "modal-description" : undefined;
 
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, [onClose]);
+  useFocusLock(contentRef, onClose);
 
-  return (
+  const handleOverlayClick = (e: React.MouseEvent) => {
+    if (e.target === overlayRef.current) onClose();
+  };
+
+  return createPortal(
     <AnimatePresence>
       {isOpen && (
-        <>
+        <motion.div
+          ref={overlayRef}
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.2 }}
+          onClick={handleOverlayClick}
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+        >
           <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            onClick={onClose}
-            className="fixed inset-0 z-50"
-            style={{ background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(6px)' }}
-          />
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95, y: 12 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 12 }}
-              transition={{ duration: 0.18 }}
-              className={clsx('w-full max-w-md shadow-2xl', className)}
-              style={{ background: 'var(--card)', borderRadius: '24px', border: '1px solid var(--liner)' }}
-            >
-              {/* Header */}
-              <div
-                className="flex items-center justify-between px-7 py-5"
-                style={{ borderBottom: '1px solid var(--liner)' }}
-              >
-                <h2
-                  className="font-black uppercase text-base tracking-tight"
-                  style={{ fontFamily: "'Sora', sans-serif", color: 'var(--text)' }}
-                >
-                  {title}
-                </h2>
-                <button
-                  onClick={onClose}
-                  aria-label="Close modal"
-                  className="rounded-xl p-1.5 transition-colors"
-                  style={{ color: 'var(--muted)' }}
-                  onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--text)')}
-                  onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--muted)')}
-                >
-                  <X className="w-5 h-5" />
-                </button>
+            ref={contentRef}
+            role="dialog"
+            aria-modal="true"
+            aria-label={title ? undefined : "Dialog"}
+            aria-labelledby={title ? "modal-title" : undefined}
+            aria-describedby={descId}
+            initial={{ opacity: 0, scale: 0.95, y: 8 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.95, y: 8 }}
+            transition={{ duration: 0.2 }}
+            className={clsx(
+              "relative w-full max-w-lg rounded-2xl border border-liner bg-card p-6 shadow-2xl",
+              "max-h-[85vh] overflow-y-auto",
+              "mx-auto my-auto"
+            )}
+          >
+            <div className="flex items-start justify-between gap-4 mb-4">
+              <div className="min-w-0 flex-1">
+                {title && (
+                  <h2 id="modal-title" className="font-display text-lg font-bold text-text">
+                    {title}
+                  </h2>
+                )}
+                {description && (
+                  <p id={descId} className="mt-1 text-sm text-muted">
+                    {description}
+                  </p>
+                )}
               </div>
-              <div className="px-7 py-6">{children}</div>
-            </motion.div>
-          </div>
-        </>
+              <button
+                onClick={onClose}
+                className="shrink-0 rounded-lg p-1.5 text-muted hover:text-text hover:bg-card-2 transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                aria-label="Close modal"
+              >
+                <X className="h-4 w-4" aria-hidden="true" />
+              </button>
+            </div>
+
+            {children}
+          </motion.div>
+        </motion.div>
       )}
-    </AnimatePresence>
+    </AnimatePresence>,
+    document.body
   );
 }

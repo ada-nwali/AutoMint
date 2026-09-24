@@ -1,95 +1,140 @@
-'use client';
-import { motion } from 'framer-motion';
-import { Zap, Clock } from 'lucide-react';
-import { TIER_META } from '@/types';
-import type { BotNFT } from '@/types';
+"use client";
+
+import { motion } from "framer-motion";
+import { Bot, Clock, Zap, Tag, Circle, Shield, Hexagon, Crown, Gem } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
+import clsx from "clsx";
+import { BOT_TIER_NAMES, BOT_TIER_COLORS, BOT_TIER_BG_COLORS } from "@/types";
+import type { BotNFT, BotTier } from "@/types";
 
 interface BotCardProps {
   bot: BotNFT;
-  onList?: (bot: BotNFT) => void;
-  compact?: boolean;
+  onListForSale?: (botId: bigint) => void;
 }
 
-export function BotCard({ bot, onList, compact = false }: BotCardProps) {
-  const meta = TIER_META[bot.tier];
-  const mintDate = new Date(Number(bot.mintedAt) * 1000).toLocaleDateString();
+/**
+ * Non-colour tier differentiators (WCAG 1.4.1). Each tier gets a distinct
+ * icon *shape* and a distinct badge *border pattern* so the tier is
+ * identifiable in greyscale and by screen readers via the adjacent text
+ * label — colour is never the only signal.
+ */
+const TIER_ICON: Record<BotTier, LucideIcon> = {
+  Basic: Circle,
+  Bronze: Shield,
+  Silver: Hexagon,
+  Gold: Crown,
+  Diamond: Gem,
+};
+
+const TIER_BADGE_BORDER: Record<BotTier, string> = {
+  Basic: "border border-dashed border-current/40",
+  Bronze: "border border-dotted border-current/50",
+  Silver: "border border-solid border-current/40",
+  Gold: "border-2 border-double border-current/60",
+  Diamond: "border-2 border-dashed border-current/50",
+};
+
+function formatDate(timestamp: number): string {
+  return new Date(timestamp * 1000).toLocaleDateString("en-US", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
+}
+
+export default function BotCard({ bot, onListForSale }: BotCardProps) {
+  const tierName = BOT_TIER_NAMES[bot.tier] ?? "Unknown";
+  const tierColor = BOT_TIER_COLORS[bot.tier] ?? "text-muted";
+  const tierBg = BOT_TIER_BG_COLORS[bot.tier] ?? "bg-muted/20";
+  const TierIcon = TIER_ICON[bot.tier] ?? Circle;
+  const tierBorder = TIER_BADGE_BORDER[bot.tier] ?? "border border-solid border-current/40";
 
   return (
     <motion.div
-      whileHover={{ y: -4, scale: 1.01 }}
-      transition={{ type: 'spring', stiffness: 300, damping: 20 }}
-      className="bot-card overflow-hidden"
-      style={{ background: 'var(--card-2)', borderRadius: '20px', border: `1px solid ${meta.color}20` }}
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.3 }}
+      className={clsx(
+        "relative rounded-2xl border border-liner bg-card p-5",
+        "flex flex-col gap-4",
+        "hover:border-white/10 transition-colors",
+      )}
     >
-      {/* Tier color top stripe */}
-      <div style={{ height: '3px', background: meta.color, opacity: 0.7 }} />
-
-      <div style={{ padding: compact ? '16px' : '20px' }}>
-        {/* Header row */}
-        <div className="flex items-start justify-between mb-4">
-          <div className="flex items-center gap-3">
-            <div
-              className="w-10 h-10 rounded-xl flex items-center justify-center text-xl"
-              style={{ background: `${meta.color}18`, border: `1px solid ${meta.color}35` }}
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-3">
+          <div
+            className={clsx(
+              "flex h-11 w-11 shrink-0 items-center justify-center rounded-xl",
+              tierBg,
+            )}
+          >
+            <Bot className={clsx("h-5 w-5", tierColor)} aria-hidden="true" />
+          </div>
+          <div className="min-w-0">
+            <p
+              className="truncate font-display text-sm font-semibold text-text"
+              title={bot.name || tierName}
             >
-              {meta.emoji}
-            </div>
-            <div>
-              <div
-                className="font-black text-sm uppercase tracking-wide"
-                style={{ fontFamily: "'Sora', sans-serif", color: 'var(--text)' }}
-              >
-                {meta.tier}
-              </div>
-              <div className="text-xs font-mono" style={{ color: 'var(--muted)' }}>
-                #{String(bot.id).padStart(4, '0')}
-              </div>
-            </div>
+              {bot.name || tierName}
+            </p>
+            <p className="text-xs text-muted">#{bot.id.toString()}</p>
           </div>
-          <span
-            className="badge"
-            style={{ background: `${meta.color}14`, color: meta.color, borderRadius: '8px', fontSize: '10px' }}
-          >
-            T{meta.index}
-          </span>
         </div>
 
-        {/* Rate */}
-        <div className="flex items-center gap-1.5 mb-1">
-          <Zap className="w-3.5 h-3.5" style={{ color: 'var(--green)' }} />
-          <span className="text-xs" style={{ color: 'var(--muted)' }}>
-            <span style={{ color: 'var(--green)', fontWeight: 700, fontFamily: "'Sora', sans-serif" }}>
-              {meta.ratePerHour}
-            </span>{' '}
-            pts/hr
-          </span>
-        </div>
-
-        {!compact && (
-          <div className="flex items-center gap-1.5 mb-4">
-            <Clock className="w-3 h-3" style={{ color: 'var(--muted)', opacity: 0.5 }} />
-            <span className="text-xs" style={{ color: 'var(--muted)', opacity: 0.6 }}>Minted {mintDate}</span>
-          </div>
-        )}
-
-        {onList && (
-          <button
-            onClick={() => onList(bot)}
-            className="w-full mt-3 py-2 px-3 rounded-xl text-xs font-semibold transition-all"
-            style={{ border: '1px solid var(--liner)', color: 'var(--muted)', background: 'transparent', cursor: 'pointer' }}
-            onMouseEnter={(e) => {
-              (e.currentTarget as HTMLElement).style.borderColor = meta.color;
-              (e.currentTarget as HTMLElement).style.color = meta.color;
-            }}
-            onMouseLeave={(e) => {
-              (e.currentTarget as HTMLElement).style.borderColor = 'var(--liner)';
-              (e.currentTarget as HTMLElement).style.color = 'var(--muted)';
-            }}
-          >
-            List for Sale
-          </button>
-        )}
+        <span
+          data-testid="tier-badge"
+          data-tier={tierName}
+          className={clsx(
+            "inline-flex shrink-0 items-center gap-1 rounded-full px-2.5 py-0.5",
+            "text-xs font-medium",
+            tierBg,
+            tierColor,
+            tierBorder,
+          )}
+        >
+          <TierIcon className="h-3 w-3 shrink-0" aria-hidden="true" />
+          {tierName}
+        </span>
       </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        <div className="flex items-center gap-2 rounded-lg bg-card-2 px-3 py-2">
+          <Zap className="h-3.5 w-3.5 shrink-0 text-gold" aria-hidden="true" />
+          <div className="min-w-0">
+            <p className="text-[10px] uppercase tracking-wider text-muted">Rate</p>
+            <p className="truncate text-sm font-semibold text-text">
+              {bot.accrual_rate.toString()}{" "}
+              <span className="text-xs font-normal text-muted">pt/hr</span>
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 rounded-lg bg-card-2 px-3 py-2">
+          <Clock className="h-3.5 w-3.5 shrink-0 text-blue" aria-hidden="true" />
+          <div className="min-w-0">
+            <p className="text-[10px] uppercase tracking-wider text-muted">Minted</p>
+            <p className="truncate text-sm font-semibold text-text">{formatDate(bot.minted_at)}</p>
+          </div>
+        </div>
+      </div>
+
+      {onListForSale && (
+        <button
+          type="button"
+          onClick={() => onListForSale(bot.id)}
+          aria-label={`List for Sale — ${bot.name || tierName} #${bot.id.toString()}`}
+          className={clsx(
+            "flex min-h-11 items-center justify-center gap-2",
+            "rounded-xl border border-liner bg-card-2 px-4 py-2.5",
+            "text-sm font-medium text-text",
+            "hover:bg-white/5 hover:border-white/10 transition-colors",
+            "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+          )}
+        >
+          <Tag className="h-3.5 w-3.5" aria-hidden="true" />
+          List for Sale
+        </button>
+      )}
     </motion.div>
   );
 }
