@@ -116,7 +116,7 @@ describe("useWallet background polling (#457)", () => {
     seedCache(queryClient, ["registered", "GACCOUNT_A"], true);
     seedCache(queryClient, ["profile", "GACCOUNT_A"], { username: "alice" });
     seedCache(queryClient, ["bots", "GACCOUNT_A"], [1n, 2n]);
-    seedCache(queryClient, ["accrualState", "GACCOUNT_A"], { last_claim_ts: 0n, total_claimed_points: 0n });
+    seedCache(queryClient, ["accrualState", "GACCOUNT_A"], { last_claim_ts: 0n, carry_points: 0n, lifetime_points: 0n });
     seedCache(queryClient, ["amtBalance", "GACCOUNT_A"], 500n);
     seedCache(queryClient, ["dashboard", "GACCOUNT_A"], {});
     seedCache(queryClient, ["myListings", "GACCOUNT_A"], []);

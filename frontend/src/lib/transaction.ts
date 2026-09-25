@@ -22,6 +22,7 @@ import {
   UserRejectedError,
 } from "./stellar";
 import { withRetry } from "./rpcRetry";
+import { useTxStore, type TxRecord } from "@/store/txStore";
 
 /**
  * Multiplier applied to the assembled resource fee to add a safety buffer.
@@ -121,6 +122,36 @@ async function processQueue(address: string): Promise<void> {
 }
 
 /**
+ * Hashes being polled by this session — by a live {@link executeTransaction}
+ * or by {@link resumePendingTransactions} — so no hash is polled twice at once.
+ */
+const polling = new Set<string>();
+
+/**
+ * Render call arguments as a short, human-readable string for the history
+ * panel. Best-effort: an argument that cannot be decoded is shown as `?`.
+ */
+export function summarizeArgs(args: xdr.ScVal[]): string {
+  return args
+    .map((arg) => {
+      try {
+        const native = scValToNative(arg);
+        const text =
+          typeof native === "object" && native !== null
+            ? JSON.stringify(native, (_key, value) =>
+                typeof value === "bigint" ? value.toString() : value
+              )
+            : String(native);
+        // Keeps both ends of long values (addresses, contract IDs) recognisable.
+        return text.length > 20 ? `${text.slice(0, 8)}…${text.slice(-4)}` : text;
+      } catch {
+        return "?";
+      }
+    })
+    .join(", ");
+}
+
+/**
  * Build explorer URL from transaction hash.
  */
 function buildExplorerUrl(hash: string): string {
@@ -132,9 +163,16 @@ function buildExplorerUrl(hash: string): string {
 /**
  * Submit a signed transaction and poll until confirmation, with hash extraction.
  * Similar to submitTx but also returns the transaction hash.
+ *
+ * `onAccepted` fires once the network has accepted the transaction and its
+ * hash is known — *before* polling starts — so callers can persist the hash
+ * while it is still confirming. The persisted history entry is settled here
+ * when the poll reaches SUCCESS or FAILED; a timeout deliberately leaves it
+ * `pending`, since the transaction may yet land.
  */
 async function submitTxWithHash(
-  signedXdr: string
+  signedXdr: string,
+  onAccepted?: (hash: string) => void
 ): Promise<{ hash: string; result: unknown }> {
   const server = getServer();
 
@@ -188,7 +226,27 @@ async function submitTxWithHash(
     throw new TxSendFailedError("No transaction hash returned from sendTransaction");
   }
 
-  // Poll with exponential backoff and a hard timeout
+  // TRY_AGAIN_LATER means the node did not take the transaction, so there is
+  // nothing to track or resume; every other non-ERROR status was accepted.
+  if ((sendRes as unknown as { status: string }).status !== "TRY_AGAIN_LATER") {
+    onAccepted?.(hash);
+  }
+  polling.add(hash);
+  try {
+    return await pollSubmitted(server, hash);
+  } finally {
+    polling.delete(hash);
+  }
+}
+
+/**
+ * Poll an accepted transaction with exponential backoff and a hard timeout,
+ * settling its persisted history entry on SUCCESS / FAILED.
+ */
+async function pollSubmitted(
+  server: SorobanRpc.Server,
+  hash: string
+): Promise<{ hash: string; result: unknown }> {
   const timeoutMs = (TX_TIMEOUT + 30) * 1000;
   const start = Date.now();
   let delayMs = 1000;
@@ -213,6 +271,7 @@ async function submitTxWithHash(
     }
 
     if (status === "SUCCESS") {
+      useTxStore.getState().resolveTransaction(hash, "success");
       const ret = (getRes as unknown as { returnValue?: xdr.ScVal }).returnValue;
       let result: unknown = undefined;
       if (ret) {
@@ -229,6 +288,11 @@ async function submitTxWithHash(
       const diag =
         (getRes as unknown as { resultXdr?: string }).resultXdr ??
         (getRes as unknown as { errorResultXdr?: string }).errorResultXdr;
+      // The SDK's resultXdr is an XDR object at runtime; only a string is safe
+      // to persist as the failure detail.
+      useTxStore
+        .getState()
+        .resolveTransaction(hash, "failed", typeof diag === "string" ? diag : undefined);
       throw new TxFailedError(
         `Transaction failed on-chain: ${diag ?? "unknown"}`,
         diag
@@ -375,13 +439,21 @@ async function executeTransactionInternal(
   // Increment pending sequence for this submission
   sequenceState.pending = sequenceState.current + 1;
 
-  try {
-    const { hash, result } = await submitTxWithHash(signedXdr);
-
-    onStatus?.({
-      stage: "polling",
-      hash,
+  // Once the network has accepted the transaction: persist it to the history
+  // (so a tab closed mid-confirmation is resolved on the next load) and report
+  // that confirmation has begun.
+  const onAccepted = (acceptedHash: string) => {
+    useTxStore.getState().addTransaction({
+      hash: acceptedHash,
+      account: sourceAddress,
+      method,
+      argsSummary: summarizeArgs(args),
     });
+    onStatus?.({ stage: "polling", hash: acceptedHash });
+  };
+
+  try {
+    const { hash, result } = await submitTxWithHash(signedXdr, onAccepted);
 
     // Increment current sequence on successful submission
     sequenceState.current = sequenceState.pending;
@@ -448,7 +520,10 @@ async function executeTransactionInternal(
 
       onStatus?.({ stage: "submitting" });
 
-      const { hash: retryHash, result: retryResult } = await submitTxWithHash(retrySignedXdr);
+      const { hash: retryHash, result: retryResult } = await submitTxWithHash(
+        retrySignedXdr,
+        onAccepted
+      );
 
       sequenceState.current = sequenceState.pending;
 
@@ -461,6 +536,95 @@ async function executeTransactionInternal(
     onStatus?.({ stage: "error", error: errorMsg });
     throw error;
   }
+}
+
+const getPollIntervalMs = (): number =>
+  Number(process.env.NEXT_PUBLIC_POLL_INTERVAL_MS) || 1000;
+
+/**
+ * Interpret one `getTransaction` response: a final outcome for SUCCESS /
+ * FAILED, `null` while the transaction is still unresolved (NOT_FOUND).
+ */
+function toResumeOutcome(
+  result: SorobanRpc.Api.GetTransactionResponse
+): { status: "success" } | { status: "failed"; error: string } | null {
+  const status = (result as unknown as { status: string }).status;
+  if (status === "SUCCESS") return { status: "success" };
+  if (status === "FAILED") {
+    const diag = (result as unknown as { resultXdr?: unknown }).resultXdr;
+    return {
+      status: "failed",
+      error: typeof diag === "string" && diag ? diag : "Contract execution failed",
+    };
+  }
+  return null;
+}
+
+/**
+ * Settle one persisted `pending` transaction against the network.
+ *
+ * Polls until the transaction resolves, or gives up for this load — leaving it
+ * `pending` so the next load tries again — after the same window a live
+ * submission gets. The one exception: once the transaction's time bounds have
+ * passed and the network has *positively* reported it as NOT_FOUND, it can
+ * never be included, so it is recorded as failed. An unreachable RPC never
+ * counts as evidence either way.
+ */
+async function resumeOne(record: TxRecord): Promise<void> {
+  const { resolveTransaction } = useTxStore.getState();
+  const maxWaitMs = (TX_TIMEOUT + 10) * 1000; // matches the live-poll window
+  const expiresAt = record.timestamp + maxWaitMs;
+  const startTime = Date.now();
+
+  do {
+    let notFound = false;
+    try {
+      // getTransaction is idempotent, so it gets retry + endpoint failover.
+      const outcome = toResumeOutcome(
+        await rpcCall((server) => server.getTransaction(record.hash))
+      );
+      if (outcome?.status === "success") {
+        resolveTransaction(record.hash, "success");
+        return;
+      }
+      if (outcome?.status === "failed") {
+        resolveTransaction(record.hash, "failed", outcome.error);
+        return;
+      }
+      notFound = true;
+    } catch {
+      // RPC unreachable: retry, and conclude nothing from it.
+    }
+
+    if (notFound && Date.now() >= expiresAt) {
+      resolveTransaction(record.hash, "failed", "Transaction expired before it was confirmed");
+      return;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, getPollIntervalMs()));
+  } while (Date.now() - startTime < maxWaitMs);
+}
+
+/**
+ * Resume polling for every transaction still `pending` in the persisted
+ * history — typically ones whose tab was closed mid-confirmation. Called once
+ * on app mount; safe to call again (hashes already being polled are skipped).
+ */
+export async function resumePendingTransactions(): Promise<void> {
+  const pending = useTxStore
+    .getState()
+    .transactions.filter((tx) => tx.status === "pending" && !polling.has(tx.hash));
+
+  await Promise.all(
+    pending.map(async (record) => {
+      polling.add(record.hash);
+      try {
+        await resumeOne(record);
+      } finally {
+        polling.delete(record.hash);
+      }
+    })
+  );
 }
 
 /**

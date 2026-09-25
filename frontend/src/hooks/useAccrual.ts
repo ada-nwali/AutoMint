@@ -451,7 +451,7 @@ export function useClaim() {
       queryClient.setQueryData(
         qk.accrualState(publicKey),
         (old: AccrualState | null | undefined) =>
-          old ? { ...old, last_claim_ts: nowSec, total_claimed_points: 0n } : old
+          old ? { ...old, last_claim_ts: nowSec, carry_points: 0n } : old
       );
       queryClient.setQueryData(
         qk.dashboard(publicKey),
@@ -460,7 +460,7 @@ export function useClaim() {
             ? {
                 ...old,
                 accrualState: old.accrualState
-                  ? { ...old.accrualState, last_claim_ts: nowSec, total_claimed_points: 0n }
+                  ? { ...old.accrualState, last_claim_ts: nowSec, carry_points: 0n }
                   : old.accrualState,
               }
             : old
@@ -595,12 +595,10 @@ export function useAnimatedPoints(): AnimatedPoints {
     return () => clearInterval(interval);
   }, [accrualState, ratePerHour]);
 
-  // The lifetime base is the registry point total (profile.points), NOT
-  // accrualState.total_claimed_points — that field is only the sub-threshold
-  // carry and shrinks back toward zero on every claim (#491, AM-084). When the
-  // accrual-state field `lifetime_points` lands (AM-101) it can replace this.
-  const lifetime = profile?.points ?? BigInt(0);
-  const progressToNext = accrualState?.total_claimed_points ?? BigInt(0);
+  // The headline total uses lifetime_points if available (falling back to profile?.points).
+  // progressToNext uses carry_points.
+  const lifetime = accrualState?.lifetime_points ?? profile?.points ?? BigInt(0);
+  const progressToNext = accrualState?.carry_points ?? BigInt(0);
 
   return { total: lifetime + pending, pending, progressToNext };
 }

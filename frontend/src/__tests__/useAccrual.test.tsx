@@ -134,7 +134,8 @@ describe('useAccrual Hooks', () => {
       mockGetUserBots.mockResolvedValue([1n]);
       mockGetAccrualState.mockResolvedValue({
         last_claim_ts: 1n,
-        total_claimed_points: 0n,
+        carry_points: 0n,
+        lifetime_points: 0n,
       });
 
       const { result } = renderHook(() => useRegister(), { wrapper });
@@ -348,7 +349,8 @@ describe('useAccrual Hooks', () => {
     it('should return accrual state', async () => {
       const mockState: AccrualState = {
         last_claim_ts: 1234567890n,
-        total_claimed_points: 1000n,
+        carry_points: 1000n,
+        lifetime_points: 2500n,
       };
 
       mockGetAccrualState.mockResolvedValue(mockState);
@@ -482,7 +484,8 @@ describe('useAnimatedPoints (#491, #490)', () => {
     mockGetUserProfile.mockResolvedValue({ username: 'u', points: 12_345n });
     mockGetAccrualState.mockResolvedValue({
       last_claim_ts: BigInt(lastClaim),
-      total_claimed_points: 42n, // the sub-threshold carry, NOT a lifetime total
+      carry_points: 42n,
+      lifetime_points: 12_345n,
     });
 
     const { result } = renderHook(() => useAnimatedPoints(), { wrapper: wrap });
@@ -503,7 +506,8 @@ describe('useAnimatedPoints (#491, #490)', () => {
     mockGetUserProfile.mockResolvedValue({ username: 'u', points: 1000n });
     mockGetAccrualState.mockResolvedValue({
       last_claim_ts: BigInt(Math.floor(Date.now() / 1000)),
-      total_claimed_points: 3n,
+      carry_points: 3n,
+      lifetime_points: 1000n,
     });
 
     const { result } = renderHook(() => useAnimatedPoints(), { wrapper: wrap });
@@ -518,7 +522,8 @@ describe('useAnimatedPoints (#491, #490)', () => {
     mockGetUserProfile.mockResolvedValue({ username: 'u', points: 0n });
     mockGetAccrualState.mockResolvedValue({
       last_claim_ts: BigInt(Math.floor(Date.now() / 1000) - 3600), // one hour ago
-      total_claimed_points: 0n,
+      carry_points: 0n,
+      lifetime_points: 0n,
     });
 
     const { result } = renderHook(() => useAnimatedPoints(), { wrapper: wrap });
@@ -531,7 +536,8 @@ describe('useAnimatedPoints (#491, #490)', () => {
     mockGetUserProfile.mockResolvedValue({ username: 'u', points: 0n });
     mockGetAccrualState.mockResolvedValue({
       last_claim_ts: BigInt(Math.floor(Date.now() / 1000) - 3600),
-      total_claimed_points: 0n,
+      carry_points: 0n,
+      lifetime_points: 0n,
     });
 
     const { result } = renderHook(() => useAnimatedPoints(), { wrapper: wrap });

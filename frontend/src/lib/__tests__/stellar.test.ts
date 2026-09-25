@@ -72,6 +72,9 @@ import {
   boolToScVal,
 } from "../stellar";
 
+/** A stand-in ScVal exposing only the discriminant `simulateContractCall` inspects. */
+const scVal = (type = "scvU32") => ({ type, switch: () => ({ name: type }) });
+
 const mockIsConnected = isConnected as jest.Mock;
 const mockRequestAccess = requestAccess as jest.Mock;
 const mockGetNetwork = getNetwork as jest.Mock;
@@ -123,18 +126,40 @@ describe("connectFreighter", () => {
 describe("simulateContractCall", () => {
   beforeEach(() => {
     mockGetAccount.mockResolvedValue({ accountId: () => "GSRC" });
+    mockIsSimulationError.mockReturnValue(false);
   });
 
   it("returns the decoded native value on success", async () => {
-    mockSimulateTransaction.mockResolvedValue({
-      result: { retval: { xdr: true } },
-    });
-    mockIsSimulationError.mockReturnValue(false);
+    const retval = scVal();
+    mockSimulateTransaction.mockResolvedValue({ result: { retval } });
     mockScValToNative.mockReturnValue(42);
 
-    const value = await simulateContractCall("CCONTRACT", "total_users", [], "GSRC");
+    const value = await simulateContractCall<number>("CCONTRACT", "total_users", [], "GSRC");
     expect(value).toBe(42);
-    expect(mockScValToNative).toHaveBeenCalledWith({ xdr: true });
+    expect(mockScValToNative).toHaveBeenCalledWith(retval);
+  });
+
+  it.each([
+    ["zero", 0],
+    ["false", false],
+    ["an empty vector", []],
+    ["an empty string", ""],
+  ])("decodes a returned %s instead of treating it as absent", async (_label, native) => {
+    mockSimulateTransaction.mockResolvedValue({ result: { retval: scVal() } });
+    mockScValToNative.mockReturnValue(native);
+
+    const value = await simulateContractCall("CCONTRACT", "balance", [], "GSRC");
+    expect(value).toStrictEqual(native);
+  });
+
+  it("resolves to undefined, without throwing, when the function returns void", async () => {
+    mockSimulateTransaction.mockResolvedValue({
+      result: { retval: scVal("scvVoid") },
+    });
+
+    const value = await simulateContractCall("CCONTRACT", "set_flag", [], "GSRC");
+    expect(value).toBeUndefined();
+    expect(mockScValToNative).not.toHaveBeenCalled();
   });
 
   it("throws when the simulation reports an error", async () => {
@@ -146,13 +171,12 @@ describe("simulateContractCall", () => {
     ).rejects.toThrow(/Simulation failed/i);
   });
 
-  it("throws when there is no return value", async () => {
-    mockSimulateTransaction.mockResolvedValue({ result: {} });
-    mockIsSimulationError.mockReturnValue(false);
+  it("throws when the RPC response carries no result at all", async () => {
+    mockSimulateTransaction.mockResolvedValue({});
 
     await expect(
       simulateContractCall("CCONTRACT", "balance", [], "GSRC")
-    ).rejects.toThrow(/No return value/i);
+    ).rejects.toThrow(/No result/i);
   });
 });
 
@@ -195,7 +219,7 @@ describe("read caching (#482)", () => {
   beforeEach(() => {
     mockGetAccount.mockResolvedValue({ accountId: () => src });
     mockSimulateTransaction.mockResolvedValue({
-      result: { retval: { xdr: true } },
+      result: { retval: scVal() },
     });
     mockIsSimulationError.mockReturnValue(false);
     mockScValToNative.mockReturnValue(1);

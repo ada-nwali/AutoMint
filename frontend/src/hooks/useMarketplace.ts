@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { getActiveListings, getUserListings } from "@/lib/contracts";
+import { getActiveListings, getUserListings, buildListBotArgs } from "@/lib/contracts";
 import { executeTransaction, type TransactionStatus } from "@/lib/transaction";
 import { useWalletStore, selectPublicKey } from "@/store/walletStore";
 import { nativeToScVal, xdr } from "@stellar/stellar-sdk";
@@ -215,10 +215,10 @@ export function useListBot() {
         executeTransaction({
           contractId: MARKETPLACE_CONTRACT_ID,
           method: "list_bot",
-          args: [
-            nativeToScVal(botId, { type: "u128" }),
-            nativeToScVal(price, { type: "u128" }),
-          ],
+          // list_bot(seller, bot_id, price, currency): the connected wallet is
+          // the seller whose auth the contract requires; currency is the
+          // configured payment token.
+          args: buildListBotArgs(publicKey, botId, price),
           sourceAddress: publicKey,
           onStatus: (status: TransactionStatus) => {
             trackStatus(txId, "Listing", status);
