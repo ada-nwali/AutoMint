@@ -795,6 +795,58 @@
             "key": {
               "vec": [
                 {
+                  "symbol": "TierIndex"
+                },
+                {
+                  "u32": 0
+                }
+              ]
+            },
+            "durability": "persistent"
+          }
+        },
+        [
+          {
+            "last_modified_ledger_seq": 0,
+            "data": {
+              "contract_data": {
+                "ext": "v0",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M",
+                "key": {
+                  "vec": [
+                    {
+                      "symbol": "TierIndex"
+                    },
+                    {
+                      "u32": 0
+                    }
+                  ]
+                },
+                "durability": "persistent",
+                "val": {
+                  "vec": [
+                    {
+                      "u64": 1
+                    },
+                    {
+                      "u64": 2
+                    }
+                  ]
+                }
+              }
+            },
+            "ext": "v0"
+          },
+          120960
+        ]
+      ],
+      [
+        {
+          "contract_data": {
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M",
+            "key": {
+              "vec": [
+                {
                   "symbol": "TierSupply"
                 },
                 {
@@ -830,7 +882,7 @@
             },
             "ext": "v0"
           },
-          4095
+          120960
         ]
       ],
       [

@@ -692,6 +692,57 @@ export async function mintBasicBot(userAddress: string): Promise<string> {
 }
 
 /**
+ * Bump storage TTL for a specific bot (permissionless, #397).
+ * Extends the bot's persistent storage retention window.
+ */
+export async function bumpBot(botId: bigint, sourceAddress?: string): Promise<string> {
+  const source = defaultSource(sourceAddress);
+  return buildTxXdr(
+    BOT_NFT_CONTRACT_ID,
+    "bump_bot",
+    [nativeToScVal(botId, { type: "u64" })],
+    source
+  );
+}
+
+/**
+ * Bump storage TTL for all bots belonging to a user (permissionless, #397).
+ * Extends both the user's bot list and each bot's persistent storage retention window.
+ */
+export async function bumpUserBots(userAddress: string, sourceAddress?: string): Promise<string> {
+  const source = defaultSource(sourceAddress ?? userAddress);
+  return buildTxXdr(
+    BOT_NFT_CONTRACT_ID,
+    "bump_user_bots",
+    [nativeToScVal(userAddress, { type: "address" })],
+    source
+  );
+}
+
+/**
+ * Query bot IDs by tier with contract-side paging (#398).
+ */
+export async function getBotsByTier(
+  tier: BotTier,
+  page: number = 0,
+  sourceAddress?: string
+): Promise<bigint[]> {
+  const raw = await simulateContractCall(
+    BOT_NFT_CONTRACT_ID,
+    "get_bots_by_tier",
+    [
+      nativeToScVal(tier, { type: "symbol" }),
+      nativeToScVal(page, { type: "u32" }),
+    ],
+    defaultSource(sourceAddress)
+  );
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+  return raw.map((id) => toBigInt(id, "bot_id"));
+}
+
+/**
  * Start accrual for a user in the accrual contract.
  */
 export async function startAccrual(userAddress: string, rate: number): Promise<string> {

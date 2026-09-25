@@ -195,3 +195,88 @@ Example:
 ```rust
 let admin = bot_nft_client.admin();
 ```
+
+---
+
+### burn
+
+```rust
+pub fn burn(env: Env, bot_id: u64, owner: Address) -> Result<(), BotNFTError>
+```
+
+Burn an existing bot NFT. Requires authorization from `owner`. Removes the bot from storage, decrements tier supply, updates the owner's bot list and tier index, decrements the registry count, and emits a `burn` event.
+
+Errors:
+- `BotNotFound`: `bot_id` does not exist.
+- `NotOwner`: `owner` does not match the current owner of `bot_id`.
+
+Example:
+
+```rust
+bot_nft_client.burn(&bot_id, &owner);
+```
+
+---
+
+### bump_bot
+
+```rust
+pub fn bump_bot(env: Env, bot_id: u64) -> Result<(), BotNFTError>
+```
+
+Permissionlessly refresh the persistent storage TTL of `bot_id` and contract instance. Extends the TTL by `LEDGER_BUMP` (120,960 ledgers, ~7 days) when remaining TTL drops below `LEDGER_THRESHOLD` (103,680 ledgers, ~6 days).
+
+Errors:
+- `BotNotFound`: `bot_id` does not exist.
+
+Example:
+
+```rust
+bot_nft_client.bump_bot(&bot_id);
+```
+
+---
+
+### bump_user_bots
+
+```rust
+pub fn bump_user_bots(env: Env, user: Address) -> Result<(), BotNFTError>
+```
+
+Permissionlessly refresh the persistent storage TTL of `user`'s bot list, every bot owned by `user`, and the contract instance.
+
+Errors:
+- `NotFound`: `user` has no bot records.
+
+Example:
+
+```rust
+bot_nft_client.bump_user_bots(&user);
+```
+
+---
+
+### get_bots_by_tier
+
+```rust
+pub fn get_bots_by_tier(env: Env, tier: BotTier, page: u32) -> Vec<u64>
+```
+
+Return a page of bot IDs for the specified `tier`. Results are paged in buckets of `TIER_PAGE_SIZE` (10), 0-indexed. The index is updated on mint and burn, and is unaffected by transfers.
+
+Example:
+
+```rust
+let page_zero = bot_nft_client.get_bots_by_tier(&BotTier::Diamond, &0);
+```
+
+---
+
+## Storage TTL and Retention Window
+
+The contract uses Soroban persistent storage with an active archival prevention policy:
+- **`LEDGER_THRESHOLD`**: `103680` ledgers (~6 days at 5s/ledger)
+- **`LEDGER_BUMP`**: `120960` ledgers (~7 days at 5s/ledger)
+
+Every write path (`initialize`, `mint_basic`, `mint_tier`, `admin_mint`, `transfer`, `burn`) extends the TTL of all modified storage entries (`Bot(id)`, `UserBots(user)`, `TierSupply(tier)`, `TierIndex(tier)`) as well as the contract instance. In addition, `bump_bot` and `bump_user_bots` provide permissionless endpoints so callers or frontends can keep entries alive before the ~7-day window expires without transferring or burning bots.
+
