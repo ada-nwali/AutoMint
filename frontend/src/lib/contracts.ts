@@ -705,9 +705,13 @@ export async function getAccrualState(userAddress: string): Promise<AccrualState
 
   return {
     last_claim_ts: toBigInt(stateRaw.last_claim_ts, "last_claim_ts"),
-    total_claimed_points: toBigInt(
-      stateRaw.total_claimed_points,
-      "total_claimed_points"
+    carry_points: toBigInt(
+      stateRaw.carry_points ?? stateRaw.total_claimed_points,
+      "carry_points"
+    ),
+    lifetime_points: toBigInt(
+      stateRaw.lifetime_points ?? 0n,
+      "lifetime_points"
     ),
   };
 }

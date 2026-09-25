@@ -95,7 +95,10 @@ export function classifyError(error: unknown): ClassifiedError {
     lower.includes("listingnotfound") ||
     lower.includes("listingnotactive") ||
     lower.includes("insufficientfunds") ||
-    lower.includes("alreadyinitialized")
+    lower.includes("alreadyinitialized") ||
+    lower.includes("registrycallfailed") ||
+    lower.includes("tokenmintfailed") ||
+    lower.includes("listingstale")
   ) {
     return {
       category: "contract",

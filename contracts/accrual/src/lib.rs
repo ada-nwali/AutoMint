@@ -9,7 +9,8 @@ use soroban_sdk::{
 #[contracttype]
 pub struct AccrualState {
     pub last_claim_ts: u64,
-    pub total_claimed_points: u64,
+    pub carry_points: u64,
+    pub lifetime_points: u64,
 }
 
 #[derive(Clone)]
@@ -33,7 +34,8 @@ fn read_accrual_state(env: &Env, user: &Address) -> Option<AccrualState> {
         .get::<_, UserAccrual>(&DataKey::UserAccrual(user.clone()))
         .map(|a| AccrualState {
             last_claim_ts: a.last_claim_ts,
-            total_claimed_points: a.total_claimed_points,
+            carry_points: a.carry_points,
+            lifetime_points: a.lifetime_points,
         })
 }
 
@@ -43,7 +45,8 @@ pub struct UserAccrual {
     pub user: Address,
     pub rate: u64,
     pub last_claim_ts: u64,
-    pub total_claimed_points: u64,
+    pub carry_points: u64,
+    pub lifetime_points: u64,
     pub started_at: u64,
 }
 
@@ -55,6 +58,34 @@ pub enum AccrualError {
     NotStarted = 3,
     Unauthorized = 4,
     NotInitialized = 5,
+    RegistryCallFailed = 6,
+    TokenMintFailed = 7,
+}
+
+fn get_reg_err_code(
+    res: &Result<
+        Result<(), soroban_sdk::ConversionError>,
+        Result<automint_registry::RegistryError, soroban_sdk::InvokeError>,
+    >,
+) -> u32 {
+    match res {
+        Ok(Ok(())) => 0,
+        Err(Ok(e)) => *e as u32,
+        _ => 999,
+    }
+}
+
+fn get_token_err_code(
+    res: &Result<
+        Result<(), soroban_sdk::ConversionError>,
+        Result<automint_token::TokenError, soroban_sdk::InvokeError>,
+    >,
+) -> u32 {
+    match res {
+        Ok(Ok(())) => 0,
+        Err(Ok(e)) => *e as u32,
+        _ => 999,
+    }
 }
 
 const LEDGER_BUMP: u32 = 120960;
@@ -104,7 +135,8 @@ impl AccrualContract {
             user: user.clone(),
             rate,
             last_claim_ts: env.ledger().timestamp(),
-            total_claimed_points: 0,
+            carry_points: 0,
+            lifetime_points: 0,
             started_at: env.ledger().timestamp(),
         };
         env.storage()
@@ -163,25 +195,46 @@ impl AccrualContract {
             .get(&DataKey::Config)
             .ok_or(AccrualError::Unauthorized)?;
 
-        // Total redeemable points
-        let updated_points = accrual.total_claimed_points.saturating_add(pending);
+        // Total redeemable carry points
+        let updated_carry = accrual.carry_points.saturating_add(pending);
 
         // Number of AMT tokens to mint
-        let amt_to_mint = updated_points / config.points_per_amt;
+        let amt_to_mint = updated_carry / config.points_per_amt;
 
         // Carry forward only leftover points
-        let remaining_points = updated_points % config.points_per_amt;
+        let remaining_carry = updated_carry % config.points_per_amt;
+
+        // Lifetime points accumulation
+        let updated_lifetime = accrual.lifetime_points.saturating_add(pending);
 
         let reg_client = automint_registry::RegistryContractClient::new(&env, &registry);
 
-        reg_client.add_points(&user, &pending);
+        let reg_res = reg_client.try_add_points(&user, &pending);
+        if reg_res.is_err() || matches!(&reg_res, Ok(Err(_))) {
+            let code = get_reg_err_code(&reg_res);
+            env.events()
+                .publish((symbol_short!("fail_reg"), user.clone()), code);
+            return Err(AccrualError::RegistryCallFailed);
+        }
 
         if amt_to_mint > 0 {
             let token_client = automint_token::AMTTokenClient::new(&env, &token_contract);
 
-            token_client.mint(&user, &(amt_to_mint as i128));
+            let mint_res = token_client.try_mint(&user, &(amt_to_mint as i128));
+            if mint_res.is_err() || matches!(&mint_res, Ok(Err(_))) {
+                let code = get_token_err_code(&mint_res);
+                env.events()
+                    .publish((symbol_short!("fail_mint"), user.clone()), code);
+                return Err(AccrualError::TokenMintFailed);
+            }
 
-            reg_client.add_claimed_amt(&user, &(amt_to_mint as i128));
+            let claimed_res = reg_client.try_add_claimed_amt(&user, &(amt_to_mint as i128));
+            if claimed_res.is_err() || matches!(&claimed_res, Ok(Err(_))) {
+                let code = get_reg_err_code(&claimed_res);
+                env.events()
+                    .publish((symbol_short!("fail_reg"), user.clone()), code);
+                return Err(AccrualError::RegistryCallFailed);
+            }
 
             env.events()
                 .publish((symbol_short!("mint"), user.clone()), amt_to_mint as i128);
@@ -192,7 +245,8 @@ impl AccrualContract {
             user: accrual.user,
             rate: accrual.rate,
             last_claim_ts: current_ts,
-            total_claimed_points: remaining_points,
+            carry_points: remaining_carry,
+            lifetime_points: updated_lifetime,
             started_at: accrual.started_at,
         };
 
@@ -204,15 +258,14 @@ impl AccrualContract {
             LEDGER_THRESHOLD,
             LEDGER_BUMP,
         );
-        // #544: keep the contract instance itself alive on write activity
-        // too — mirrors `registry::register` and the analogous fixes in
-        // bot_nft::transfer and token::do_transfer/burn.
         env.storage()
             .instance()
             .extend_ttl(LEDGER_THRESHOLD, LEDGER_BUMP);
 
-        env.events()
-            .publish((symbol_short!("claim"), user), (pending, remaining_points));
+        env.events().publish(
+            (symbol_short!("claim"), user),
+            (pending, remaining_carry, updated_lifetime),
+        );
 
         Ok(pending as i128)
     }
@@ -300,7 +353,8 @@ mod test {
 
         let state = client.get_accrual_state(&user).unwrap();
         assert_eq!(state.last_claim_ts, start_ts);
-        assert_eq!(state.total_claimed_points, 0);
+        assert_eq!(state.carry_points, 0);
+        assert_eq!(state.lifetime_points, 0);
     }
 
     #[test]
@@ -431,7 +485,8 @@ mod test {
 
         let state = client.get_accrual_state(&user).unwrap();
         assert_eq!(state.last_claim_ts, env.ledger().timestamp());
-        assert_eq!(state.total_claimed_points, 0);
+        assert_eq!(state.carry_points, 0);
+        assert_eq!(state.lifetime_points, 0);
     }
 
     #[test]
@@ -446,7 +501,8 @@ mod test {
         });
 
         let state = client.get_accrual_state(&user).unwrap();
-        assert_eq!(state.total_claimed_points, 0);
+        assert_eq!(state.carry_points, 0);
+        assert_eq!(state.lifetime_points, 0);
         assert_eq!(state.last_claim_ts, env.ledger().timestamp() - 7200);
         assert_eq!(client.pending_points(&user), 7200);
     }
@@ -461,8 +517,10 @@ mod test {
 
         let s1 = client.get_accrual_state(&u1).unwrap();
         let s2 = client.get_accrual_state(&u2).unwrap();
-        assert_eq!(s1.total_claimed_points, 0);
-        assert_eq!(s2.total_claimed_points, 0);
+        assert_eq!(s1.carry_points, 0);
+        assert_eq!(s1.lifetime_points, 0);
+        assert_eq!(s2.carry_points, 0);
+        assert_eq!(s2.lifetime_points, 0);
         assert!(client.get_accrual_state(&Address::generate(&env)).is_none());
     }
 
@@ -730,6 +788,45 @@ mod test {
 
         let state = client.get_accrual_state(&user);
         assert!(state.is_some());
+    }
+
+    #[test]
+    fn test_claim_unregistered_user_returns_registry_call_failed() {
+        let (env, _admin, registry, token, client) = setup();
+        let user = Address::generate(&env);
+        // User starts accrual but is NOT registered in registry
+        client.start_accrual(&user, &3600_u64);
+        env.ledger().with_mut(|l| {
+            l.timestamp += 100;
+        });
+
+        let result = client.try_claim(&user, &token, &registry);
+        assert_eq!(result, Err(Ok(AccrualError::RegistryCallFailed)));
+    }
+
+    #[test]
+    fn test_three_claims_lifetime_and_carry_points() {
+        let (env, _admin, registry, token, client) = setup();
+        let user = Address::generate(&env);
+        register_user(&env, &registry, &user, "threeclaims");
+        // rate=3600 → 1 point per second
+        client.start_accrual(&user, &3600_u64);
+
+        // Claim 1: 100 seconds → 100 points. (100 / 100 = 1 AMT, carry = 0, lifetime = 100)
+        env.ledger().with_mut(|l| l.timestamp += 100);
+        let _ = client.claim(&user, &token, &registry);
+
+        // Claim 2: 100 seconds → 100 points. (100 / 100 = 1 AMT, carry = 0, lifetime = 200)
+        env.ledger().with_mut(|l| l.timestamp += 100);
+        let _ = client.claim(&user, &token, &registry);
+
+        // Claim 3: 50 seconds → 50 points. (50 / 100 = 0 AMT, carry = 50, lifetime = 250)
+        env.ledger().with_mut(|l| l.timestamp += 50);
+        let _ = client.claim(&user, &token, &registry);
+
+        let state = client.get_accrual_state(&user).unwrap();
+        assert_eq!(state.lifetime_points, 250);
+        assert_eq!(state.carry_points, 50);
     }
 }
 

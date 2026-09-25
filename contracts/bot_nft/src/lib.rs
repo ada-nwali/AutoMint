@@ -3,7 +3,7 @@
 #![no_std]
 use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, symbol_short, token, Address, Bytes, Env,
-    String, Vec,
+    IntoVal, String, Vec,
 };
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -84,6 +84,18 @@ pub struct BotNFT {
 
 #[derive(Clone)]
 #[contracttype]
+pub struct StoredBotNFT {
+    pub id: u64,
+    pub tier: BotTier,
+    pub owner: Address,
+    pub minted_at: u64,
+    pub name: String,
+    pub variant: u32,
+    pub bonus_bps: u32,
+}
+
+#[derive(Clone)]
+#[contracttype]
 pub enum DataKey {
     NextId,
     Bot(u64),
@@ -92,6 +104,8 @@ pub enum DataKey {
     Initialized,
     Registry,
     TierSupply(BotTier),
+    TierRate(BotTier),
+    Marketplace,
 }
 
 #[contracterror]
@@ -136,10 +150,71 @@ impl BotNFTContract {
         env.storage().instance().set(&DataKey::NextId, &1u64);
         env.storage().instance().set(&DataKey::Initialized, &true);
         env.storage().instance().set(&DataKey::Registry, &registry);
+
+        env.storage().instance().set(&DataKey::TierRate(BotTier::Basic), &1u64);
+        env.storage().instance().set(&DataKey::TierRate(BotTier::Bronze), &5u64);
+        env.storage().instance().set(&DataKey::TierRate(BotTier::Silver), &25u64);
+        env.storage().instance().set(&DataKey::TierRate(BotTier::Gold), &100u64);
+        env.storage().instance().set(&DataKey::TierRate(BotTier::Diamond), &500u64);
+
         env.storage()
             .instance()
             .extend_ttl(LEDGER_THRESHOLD, LEDGER_BUMP);
         Ok(())
+    }
+
+    pub fn set_marketplace(env: Env, marketplace: Address) -> Result<(), BotNFTError> {
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .ok_or(BotNFTError::NotInitialized)?;
+        admin.require_auth();
+
+        env.storage().instance().set(&DataKey::Marketplace, &marketplace);
+        env.storage()
+            .instance()
+            .extend_ttl(LEDGER_THRESHOLD, LEDGER_BUMP);
+        Ok(())
+    }
+
+    pub fn set_tier_rate(env: Env, tier: BotTier, rate: u64) -> Result<(), BotNFTError> {
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .ok_or(BotNFTError::NotInitialized)?;
+        admin.require_auth();
+
+        if rate == 0 {
+            return Err(BotNFTError::InvalidTier);
+        }
+
+        let old_rate = Self::get_tier_rate_internal(&env, tier);
+
+        let max_allowed = old_rate.saturating_mul(2);
+        let min_allowed = old_rate / 2;
+        if rate > max_allowed || (min_allowed > 0 && rate < min_allowed) {
+            return Err(BotNFTError::Unauthorized);
+        }
+
+        env.storage().instance().set(&DataKey::TierRate(tier), &rate);
+        env.storage()
+            .instance()
+            .extend_ttl(LEDGER_THRESHOLD, LEDGER_BUMP);
+
+        env.events().publish(
+            (symbol_short!("rate_set"), tier),
+            (old_rate, rate),
+        );
+        Ok(())
+    }
+
+    fn get_tier_rate_internal(env: &Env, tier: BotTier) -> u64 {
+        env.storage()
+            .instance()
+            .get(&DataKey::TierRate(tier))
+            .unwrap_or_else(|| tier.rate())
     }
 
     pub fn mint_basic(env: Env, owner: Address) -> Result<u64, BotNFTError> {
@@ -223,14 +298,10 @@ impl BotNFTContract {
         let name = tier.name(env);
         let (variant, bonus_bps) =
             Self::derive_traits(env, bot_id, env.ledger().timestamp(), owner);
-        // Effective accrual rate = base rate + deterministic bonus.
-        let base = tier.rate();
-        let effective = base.saturating_add(base.saturating_mul(bonus_bps as u64) / 10000);
-        let bot = BotNFT {
+        let stored = StoredBotNFT {
             id: bot_id,
             tier,
             owner: owner.clone(),
-            accrual_rate: effective,
             minted_at: env.ledger().timestamp(),
             name,
             variant,
@@ -246,7 +317,7 @@ impl BotNFTContract {
             .persistent()
             .set(&DataKey::TierSupply(tier), &supply);
 
-        env.storage().persistent().set(&DataKey::Bot(bot_id), &bot);
+        env.storage().persistent().set(&DataKey::Bot(bot_id), &stored);
         env.storage()
             .persistent()
             .extend_ttl(&DataKey::Bot(bot_id), LEDGER_THRESHOLD, LEDGER_BUMP);
@@ -268,35 +339,42 @@ impl BotNFTContract {
         if from == to {
             return Ok(());
         }
-        let mut bot: BotNFT = env
-            .storage()
-            .persistent()
-            .get(&DataKey::Bot(bot_id))
-            .ok_or(BotNFTError::BotNotFound)?;
+        let bot: BotNFT = Self::get_bot(env.clone(), bot_id)?;
 
         if bot.owner != from {
             return Err(BotNFTError::NotOwner);
         }
 
-        bot.owner = to.clone();
-        env.storage().persistent().set(&DataKey::Bot(bot_id), &bot);
-        // #544: `set` alone does not refresh a persistent entry's TTL once
-        // it's past the extend-TTL threshold — without this, a bot that
-        // changes hands close to its expiry ledger (but is never minted
-        // again) could still silently archive out from under its new
-        // owner. Explicitly bump it on every ownership change, matching
-        // every other write path in this contract.
+        let stored = StoredBotNFT {
+            id: bot.id,
+            tier: bot.tier,
+            owner: to.clone(),
+            minted_at: bot.minted_at,
+            name: bot.name,
+            variant: bot.variant,
+            bonus_bps: bot.bonus_bps,
+        };
+        env.storage().persistent().set(&DataKey::Bot(bot_id), &stored);
         env.storage()
             .persistent()
             .extend_ttl(&DataKey::Bot(bot_id), LEDGER_THRESHOLD, LEDGER_BUMP);
-        // Also keep the contract instance itself alive on write activity —
-        // mirrors `registry::register`, which bumps its own instance TTL on
-        // every write, not just at `initialize`.
         env.storage()
             .instance()
             .extend_ttl(LEDGER_THRESHOLD, LEDGER_BUMP);
         Self::remove_bot_from_user(&env, &from, bot_id);
         Self::add_bot_to_user(&env, &to, bot_id);
+
+        if let Some(mkt_addr) = env.storage().instance().get::<_, Address>(&DataKey::Marketplace) {
+            if to != mkt_addr {
+                let mut args = Vec::new(&env);
+                args.push_back(bot_id.into_val(&env));
+                let _ = env.try_invoke_contract::<(), soroban_sdk::Error>(
+                    &mkt_addr,
+                    &soroban_sdk::Symbol::new(&env, "on_bot_moved"),
+                    args,
+                );
+            }
+        }
 
         env.events()
             .publish((symbol_short!("transfer"), from, to.clone()), bot_id);
@@ -304,21 +382,45 @@ impl BotNFTContract {
     }
 
     pub fn get_bot(env: Env, bot_id: u64) -> Result<BotNFT, BotNFTError> {
-        env.storage()
-            .persistent()
-            .get(&DataKey::Bot(bot_id))
-            .ok_or(BotNFTError::BotNotFound)
+        let stored: StoredBotNFT = match env.storage().persistent().get(&DataKey::Bot(bot_id)) {
+            Some(s) => s,
+            None => {
+                if let Some(b) = env.storage().persistent().get::<_, BotNFT>(&DataKey::Bot(bot_id)) {
+                    StoredBotNFT {
+                        id: b.id,
+                        tier: b.tier,
+                        owner: b.owner,
+                        minted_at: b.minted_at,
+                        name: b.name,
+                        variant: b.variant,
+                        bonus_bps: b.bonus_bps,
+                    }
+                } else {
+                    return Err(BotNFTError::BotNotFound);
+                }
+            }
+        };
+
+        let base_rate = Self::get_tier_rate_internal(&env, stored.tier);
+        let effective_rate = base_rate.saturating_add(base_rate.saturating_mul(stored.bonus_bps as u64) / 10000);
+
+        Ok(BotNFT {
+            id: stored.id,
+            tier: stored.tier,
+            owner: stored.owner,
+            accrual_rate: effective_rate,
+            minted_at: stored.minted_at,
+            name: stored.name,
+            variant: stored.variant,
+            bonus_bps: stored.bonus_bps,
+        })
     }
 
     /// Off-chain verifiable descriptor. The traits are derived deterministically
     /// from sha256(bot_id, minted_at, owner); this URI exposes the derivation
     /// inputs so anyone can recompute `variant`/`bonus_bps` and confirm rarity.
     pub fn token_uri(env: Env, bot_id: u64) -> Result<String, BotNFTError> {
-        let bot: BotNFT = env
-            .storage()
-            .persistent()
-            .get(&DataKey::Bot(bot_id))
-            .ok_or(BotNFTError::BotNotFound)?;
+        let bot: BotNFT = Self::get_bot(env.clone(), bot_id)?;
         let owner_str = bot.owner.to_string();
         let mut buf = Bytes::new(&env);
         buf.append(&Bytes::from_slice(&env, b"ipfs://automint/bot/"));
@@ -394,7 +496,7 @@ impl BotNFTContract {
     }
 
     pub fn get_tier_info(env: Env, tier: BotTier) -> (String, u64, i128) {
-        (tier.name(&env), tier.rate(), tier.price())
+        (tier.name(&env), Self::get_tier_rate_internal(&env, tier), tier.price())
     }
 
     fn get_next_id(env: &Env) -> u64 {
@@ -1418,5 +1520,45 @@ mod auth_tests {
         }]);
         let result = client.try_transfer(&bot_id, &owner, &to);
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_set_tier_rate_updates_get_user_total_rate_immediately() {
+        let env = Env::default();
+        let registry_id = setup_registry(&env);
+        let id = env.register_contract(None, BotNFTContract);
+        let client = BotNFTContractClient::new(&env, &id);
+        let admin = Address::generate(&env);
+        env.mock_all_auths();
+        client.initialize(&admin, &registry_id);
+
+        let alice = Address::generate(&env);
+        let bot_id = client.mint_basic(&alice);
+        let bot = client.get_bot(&bot_id);
+        let bonus = bot.bonus_bps as u64;
+
+        let rate1 = client.get_user_total_rate(&alice);
+        assert_eq!(rate1, 1 + (1 * bonus / 10000));
+
+        // Change Basic tier rate from 1 to 2
+        client.set_tier_rate(&BotTier::Basic, &2_u64);
+
+        let rate2 = client.get_user_total_rate(&alice);
+        assert_eq!(rate2, 2 + (2 * bonus / 10000));
+    }
+
+    #[test]
+    fn test_set_tier_rate_bounded_change_enforced() {
+        let env = Env::default();
+        let registry_id = setup_registry(&env);
+        let id = env.register_contract(None, BotNFTContract);
+        let client = BotNFTContractClient::new(&env, &id);
+        let admin = Address::generate(&env);
+        env.mock_all_auths();
+        client.initialize(&admin, &registry_id);
+
+        // Base rate for Basic tier is 1, max allowed 2x is 2. Setting to 5 should fail.
+        let result = client.try_set_tier_rate(&BotTier::Basic, &5_u64);
+        assert_eq!(result, Err(Ok(BotNFTError::Unauthorized)));
     }
 }
