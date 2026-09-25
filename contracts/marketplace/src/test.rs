@@ -1408,13 +1408,10 @@ fn test_e2e_five_contract_full_flow() {
         "bob total rate should be 1"
     );
 
-    // 3. Start accrual for both users.
-    // Use a high rate (3600) so 1 hour yields 3600 points → 36 AMT, making
-    // the token assertion deterministic without advancing 100 hours.
-    // This still exercises the accrual contract's rate storage.
-    let accrual_rate: u64 = 3600;
-    accrual.start_accrual(&alice, &accrual_rate);
-    accrual.start_accrual(&bob, &accrual_rate);
+    // 3. Start accrual for both users. The rate is derived from bot_nft
+    // (#319): one Basic bot each → 1 point per hour.
+    accrual.start_accrual(&alice);
+    accrual.start_accrual(&bob);
 
     // Invariants 8-9: accrual state initialized correctly.
     let alice_state = accrual
@@ -1432,17 +1429,17 @@ fn test_e2e_five_contract_full_flow() {
         "pending at t=0 should be 0"
     );
 
-    // 4. Advance time by 1 hour (3600s) and claim.
+    // 4. Advance time by 3600 hours and claim.
     env.ledger().with_mut(|li| {
-        li.timestamp = li.timestamp.saturating_add(3600);
+        li.timestamp = li.timestamp.saturating_add(3600 * 3600);
         li.sequence_number = li.sequence_number.saturating_add(10);
     });
 
-    // Pending should be rate * elapsed /3600 = 3600*3600/3600 =3600.
+    // Pending should be rate * elapsed / 3600 = 1 * 3600h = 3600.
     assert_eq!(
         accrual.pending_points(&alice),
         3600,
-        "pending after 1h at 3600/hr should be 3600 (AM-012)"
+        "pending after 3600h at 1/hr should be 3600 (AM-012)"
     );
     assert_eq!(accrual.pending_points(&bob), 3600);
 
@@ -1638,7 +1635,7 @@ fn test_e2e_five_contract_full_flow() {
         "bob rate should have increased after acquiring Gold"
     );
 
-    // Accrual contract still has original rates (3600) — not auto-synced to bot_nft.
+    // Accrual contract still has the rates captured at start — not auto-synced to bot_nft.
     // This desync is intentional; the test documents it: accrual rate is fixed at
     // start, bot_nft rate is the source of truth for future mints. Changing
     // accrual rate requires a separate update, which is out-of-scope for this

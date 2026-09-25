@@ -86,6 +86,9 @@
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM"
                 },
                 {
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                },
+                {
                   "u64": 100
                 }
               ]
@@ -570,11 +573,9 @@
                     },
                     {
                       "key": {
-                        "symbol": "name"
+                        "symbol": "nickname"
                       },
-                      "val": {
-                        "string": "Basic Bot"
-                      }
+                      "val": "void"
                     },
                     {
                       "key": {
@@ -1116,6 +1117,18 @@
                         },
                         "val": {
                           "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM"
+                        }
+                      },
+                      {
+                        "key": {
+                          "vec": [
+                            {
+                              "symbol": "BotNft"
+                            }
+                          ]
+                        },
+                        "val": {
+                          "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
                         }
                       },
                       {
@@ -1765,6 +1778,9 @@
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM"
                 },
                 {
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                },
+                {
                   "u64": 100
                 }
               ]
@@ -2355,11 +2371,9 @@
                 },
                 {
                   "key": {
-                    "symbol": "name"
+                    "symbol": "nickname"
                   },
-                  "val": {
-                    "string": "Basic Bot"
-                  }
+                  "val": "void"
                 },
                 {
                   "key": {
@@ -2644,11 +2658,9 @@
                 },
                 {
                   "key": {
-                    "symbol": "name"
+                    "symbol": "nickname"
                   },
-                  "val": {
-                    "string": "Basic Bot"
-                  }
+                  "val": "void"
                 },
                 {
                   "key": {

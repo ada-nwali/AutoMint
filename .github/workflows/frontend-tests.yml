@@ -5,6 +5,9 @@ on:
     paths:
       - "frontend/**"
       - ".github/workflows/frontend-tests.yml"
+      # contractParity.test.ts reads these (#539).
+      - "scripts/deploy.sh"
+      - "contracts/**/src/lib.rs"
   push:
     branches:
       - main
@@ -12,6 +15,9 @@ on:
     paths:
       - "frontend/**"
       - ".github/workflows/frontend-tests.yml"
+      # contractParity.test.ts reads these (#539).
+      - "scripts/deploy.sh"
+      - "contracts/**/src/lib.rs"
 
 defaults:
   run:
