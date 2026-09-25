@@ -143,7 +143,7 @@ function PointsCounterComponent({
                     <span
                       className={clsx("min-w-0 flex-1 truncate text-xs font-medium", tierColor)}
                     >
-                      {bot.name || bot.tier}
+                      {bot.nickname || bot.tier}
                     </span>
                     <span className="shrink-0 text-[10px] text-muted">#{bot.id.toString()}</span>
                   </div>

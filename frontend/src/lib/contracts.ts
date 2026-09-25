@@ -291,7 +291,7 @@ export function parseBotNFT(rawData: Record<string, unknown>): BotNFT {
 
   return {
     id: toBigInt(rawData.id, "id"),
-    name: String(rawData.name ?? ""),
+    nickname: rawData.nickname != null ? String(rawData.nickname) : undefined,
     owner: String(rawData.owner ?? ""),
     tier,
     accrual_rate: toBigInt(rawData.accrual_rate, "accrual_rate"),
@@ -945,12 +945,43 @@ export async function getUserTotalRate(userAddress: string): Promise<bigint> {
 }
 
 /**
- * Every tier's name, rate and price from the bot_nft contract (#478).
+ * Return the next bot ID to be assigned by bot_nft. Use as the exclusive
+ * upper bound when paginating with `getBotsRange` (#391).
+ */
+export async function getNextBotId(sourceAddress?: string): Promise<bigint> {
+  const source = defaultSource(sourceAddress);
+  const raw = await simulateContractCall(BOT_NFT_CONTRACT_ID, "next_id", [], source);
+  return toBigInt(raw, "next_id");
+}
+
+/**
+ * Return up to `limit` bots (max 100) with IDs in `[startId, startId + limit)`,
+ * skipping any gaps. Throws if `limit` exceeds 100 (#391).
+ */
+export async function getBotsRange(
+  startId: bigint,
+  limit: number,
+  sourceAddress?: string
+): Promise<BotNFT[]> {
+  const source = defaultSource(sourceAddress);
+  const raw = await simulateContractCall(
+    BOT_NFT_CONTRACT_ID,
+    "get_bots_range",
+    [nativeToScVal(startId, { type: "u64" }), nativeToScVal(limit, { type: "u32" })],
+    source
+  );
+  if (!Array.isArray(raw)) {
+    throw new Error(`get_bots_range returned unexpected type ${typeof raw}; expected array`);
+  }
+  return raw.map((item) => parseBotNFT(item as Record<string, unknown>));
+}
+
+/**
+ * Every tier's name, rate and price from the bot_nft contract (#478, AM-072).
  *
  * The contract is the single source of truth for tier economics; the
- * frontend keeps only presentational fields (`TIER_META`). Each tier is read
- * with `get_tier_info`, keyed by its `BotTier` discriminant (a `u32` enum).
- * Once bot_nft exposes `all_tiers()` (AM-072) this can become one call.
+ * frontend keeps only presentational fields (`TIER_META`). One `all_tiers`
+ * call returns all five entries in tier order.
  */
 export async function getAllTiers(sourceAddress?: string): Promise<Record<BotTier, TierInfo>> {
   const source = defaultSource(sourceAddress);
@@ -976,7 +1007,27 @@ export async function getAllTiers(sourceAddress?: string): Promise<Record<BotTie
       };
     })
   );
-  return Object.fromEntries(tiers.map((info) => [info.tier, info])) as Record<BotTier, TierInfo>;
+  if (!Array.isArray(raw) || raw.length !== 5) {
+    throw new Error(
+      `all_tiers returned unexpected shape; expected array of 5 TierInfo structs`
+    );
+  }
+  const entries = TIER_ORDER.map((tier, index): [BotTier, TierInfo] => {
+    const item = raw[index];
+    if (!item || typeof item !== "object") {
+      throw new Error(`all_tiers entry ${index} has unexpected shape`);
+    }
+    return [
+      tier,
+      {
+        tier,
+        name: String(item.name),
+        rate: toBigInt(item.rate, "rate"),
+        price: toBigInt(item.price, "price"),
+      },
+    ];
+  });
+  return Object.fromEntries(entries) as Record<BotTier, TierInfo>;
 }
 
 // -- Contract preflight (#464) ------------------------------------------------

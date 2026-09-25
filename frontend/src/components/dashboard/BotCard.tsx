@@ -73,9 +73,9 @@ export default function BotCard({ bot, onListForSale }: BotCardProps) {
           <div className="min-w-0">
             <p
               className="truncate font-display text-sm font-semibold text-text"
-              title={bot.name || tierName}
+              title={bot.nickname || tierName}
             >
-              {bot.name || tierName}
+              {bot.nickname || tierName}
             </p>
             <p className="text-xs text-muted">#{bot.id.toString()}</p>
           </div>
@@ -122,7 +122,7 @@ export default function BotCard({ bot, onListForSale }: BotCardProps) {
         <button
           type="button"
           onClick={() => onListForSale(bot.id)}
-          aria-label={`List for Sale — ${bot.name || tierName} #${bot.id.toString()}`}
+          aria-label={`List for Sale — ${bot.nickname || tierName} #${bot.id.toString()}`}
           className={clsx(
             "flex min-h-11 items-center justify-center gap-2",
             "rounded-xl border border-liner bg-card-2 px-4 py-2.5",

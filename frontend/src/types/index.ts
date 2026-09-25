@@ -27,7 +27,8 @@ export interface UserProfile {
 
 export interface BotNFT {
   id: bigint;
-  name: string;
+  /** Owner-set nickname; undefined when unset. Use `tier` to derive a display name. */
+  nickname?: string;
   owner: string;
   tier: BotTier;
   accrual_rate: bigint;
