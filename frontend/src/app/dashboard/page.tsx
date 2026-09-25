@@ -11,7 +11,7 @@ import {
   useAmtDecimals,
 } from "@/hooks/useAccrual";
 import { useAllBotDetails } from "@/hooks/useBotDetails";
-import { getPendingPoints } from "@/lib/contracts";
+import { getPendingPoints, bumpUserBots } from "@/lib/contracts";
 import { useState, useEffect } from "react";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { PointsCounter } from "@/components/dashboard/PointsCounter";
@@ -112,6 +112,15 @@ export default function DashboardPage() {
         .catch(() => setPendingPoints(BigInt(0)));
     }
   }, [publicKey, isRegistered, accrualState]);
+
+  // Bump storage TTL for user's bots on dashboard load to prevent archival (#397)
+  useEffect(() => {
+    if (publicKey && botIds && botIds.length > 0) {
+      bumpUserBots(publicKey).catch(() => {
+        // Permissionless maintenance call; ignore simulation or network errors
+      });
+    }
+  }, [publicKey, botIds]);
 
   // Handle claim
   const handleClaim = () => {

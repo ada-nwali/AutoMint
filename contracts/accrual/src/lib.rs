@@ -22,7 +22,7 @@ pub enum DataKey {
     UserAccrual(Address),
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq)]
 #[contracttype]
 pub struct Config {
     pub points_per_amt: u64,
@@ -60,6 +60,7 @@ pub enum AccrualError {
     NotInitialized = 5,
     RegistryCallFailed = 6,
     TokenMintFailed = 7,
+    InvalidConfig = 8,
 }
 
 fn get_reg_err_code(
@@ -102,7 +103,7 @@ impl AccrualContract {
         }
 
         if points_per_amt == 0 {
-            return Err(AccrualError::Unauthorized);
+            return Err(AccrualError::InvalidConfig);
         }
 
         admin.require_auth();
@@ -193,7 +194,7 @@ impl AccrualContract {
             .storage()
             .instance()
             .get(&DataKey::Config)
-            .ok_or(AccrualError::Unauthorized)?;
+            .ok_or(AccrualError::NotInitialized)?;
 
         // Total redeemable carry points
         let updated_carry = accrual.carry_points.saturating_add(pending);
@@ -331,7 +332,7 @@ mod test {
         let client = AccrualContractClient::new(&env, &id);
         let admin = Address::generate(&env);
         let result = client.try_initialize(&admin, &0_u64);
-        assert_eq!(result, Err(Ok(AccrualError::Unauthorized)));
+        assert_eq!(result, Err(Ok(AccrualError::InvalidConfig)));
     }
 
     #[test]
@@ -612,7 +613,21 @@ mod test {
         let id = env.register_contract(None, AccrualContract);
         let client = AccrualContractClient::new(&env, &id);
         let result = client.try_config();
-        assert!(matches!(result, Err(Ok(AccrualError::NotInitialized))));
+        assert_eq!(result, Err(Ok(AccrualError::NotInitialized)));
+    }
+
+    #[test]
+    fn test_claim_missing_config_fails_with_not_initialized() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let id = env.register_contract(None, AccrualContract);
+        let client = AccrualContractClient::new(&env, &id);
+        let user = Address::generate(&env);
+        let token = Address::generate(&env);
+        let registry = Address::generate(&env);
+        client.start_accrual(&user, &100_u64);
+        let result = client.try_claim(&user, &token, &registry);
+        assert_eq!(result, Err(Ok(AccrualError::NotInitialized)));
     }
 
     #[test]
