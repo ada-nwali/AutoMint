@@ -95,7 +95,7 @@ export default function ListBotModal({ bot, isOpen, onClose }: ListBotModalProps
       { botId: bot.id, price: validation.stroops },
       {
         onSuccess: () => {
-          toast.success(`${bot.name} listed for ${priceXlm} XLM`);
+          toast.success(`${bot.nickname ?? bot.tier} listed for ${priceXlm} XLM`);
           onClose();
           setPriceXlm("");
           setTouched(false);
@@ -118,7 +118,7 @@ export default function ListBotModal({ bot, isOpen, onClose }: ListBotModalProps
     .join(" ");
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title={`List ${bot.name} for Sale`}>
+    <Modal isOpen={isOpen} onClose={onClose} title={`List ${bot.nickname ?? bot.tier} Bot for Sale`}>
       <form onSubmit={handleSubmit} className="flex flex-col gap-5" noValidate>
         {/* Price input field with associated label, help text, and error linkage */}
         <div className="flex flex-col gap-1.5">

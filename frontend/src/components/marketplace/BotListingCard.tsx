@@ -48,7 +48,7 @@ export default function BotListingCard({
   const isOwner =
     connectedAddress !== null &&
     listing.seller.toLowerCase() === connectedAddress.toLowerCase();
-  const botLabel = `${bot?.name || tierName} Bot #${bot?.id?.toString() || listing.bot_id.toString()}`;
+  const botLabel = `${bot?.nickname || tierName} Bot #${bot?.id?.toString() || listing.bot_id.toString()}`;
 
   const [isBuyingConfirmed, setIsBuyingConfirmed] = useState(false);
   const [isCancellingConfirmed, setIsCancellingConfirmed] = useState(false);
@@ -81,7 +81,7 @@ export default function BotListingCard({
           </div>
           <div className="min-w-0">
             <p className="truncate font-display text-sm font-semibold text-text">
-              {bot?.name || tierName} Bot
+              {bot?.nickname || tierName} Bot
             </p>
             <p className="text-xs text-muted">#{bot?.id?.toString() || listing.bot_id.toString()}</p>
           </div>

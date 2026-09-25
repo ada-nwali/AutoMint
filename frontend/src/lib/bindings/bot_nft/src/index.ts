@@ -49,7 +49,8 @@ export interface BotNFT {
 bonus_bps: u32;
   id: u64;
   minted_at: u64;
-  name: string;
+  /** Owner-settable nickname; undefined/null when unset. */
+  nickname: Option<string>;
   owner: string;
   tier: BotTier;
   /**
@@ -64,6 +65,12 @@ export enum BotTier {
   Silver = 2,
   Gold = 3,
   Diamond = 4,
+}
+
+export interface TierInfo {
+  name: string;
+  rate: u64;
+  price: i128;
 }
 
 export type DataKey = {tag: "NextId", values: void} | {tag: "Bot", values: readonly [u64]} | {tag: "UserBots", values: readonly [string]} | {tag: "Admin", values: void} | {tag: "Initialized", values: void} | {tag: "Registry", values: void} | {tag: "TierSupply", values: readonly [BotTier]};
@@ -120,6 +127,12 @@ export interface Client {
   get_bot: ({bot_id}: {bot_id: u64}, options?: MethodOptions) => Promise<AssembledTransaction<Result<BotNFT>>>
 
   /**
+   * Construct and simulate a rename_bot transaction. Returns an `AssembledTransaction` object which will have a `result` field containing the result of the simulation. If this transaction changes contract state, you will need to call `signAndSend()` on the returned object.
+   * Set or clear the owner-chosen nickname (max 24 bytes). Pass an empty string to clear.
+   */
+  rename_bot: ({bot_id, name}: {bot_id: u64, name: string}, options?: MethodOptions) => Promise<AssembledTransaction<Result<void>>>
+
+  /**
    * Construct and simulate a transfer transaction. Returns an `AssembledTransaction` object which will have a `result` field containing the result of the simulation. If this transaction changes contract state, you will need to call `signAndSend()` on the returned object.
    */
   transfer: ({bot_id, from, to}: {bot_id: u64, from: string, to: string}, options?: MethodOptions) => Promise<AssembledTransaction<Result<void>>>
@@ -157,7 +170,12 @@ export interface Client {
   /**
    * Construct and simulate a get_tier_info transaction. Returns an `AssembledTransaction` object which will have a `result` field containing the result of the simulation. If this transaction changes contract state, you will need to call `signAndSend()` on the returned object.
    */
-  get_tier_info: ({tier}: {tier: BotTier}, options?: MethodOptions) => Promise<AssembledTransaction<readonly [string, u64, i128]>>
+  get_tier_info: ({tier}: {tier: BotTier}, options?: MethodOptions) => Promise<AssembledTransaction<TierInfo>>
+
+  /**
+   * Construct and simulate an all_tiers transaction. Returns an `AssembledTransaction` object which will have a `result` field containing the result of the simulation. If this transaction changes contract state, you will need to call `signAndSend()` on the returned object.
+   */
+  all_tiers: (options?: MethodOptions) => Promise<AssembledTransaction<Array<TierInfo>>>
 
   /**
    * Construct and simulate a get_user_bots transaction. Returns an `AssembledTransaction` object which will have a `result` field containing the result of the simulation. If this transaction changes contract state, you will need to call `signAndSend()` on the returned object.
@@ -185,6 +203,18 @@ export interface Client {
    * ID-based getters (#483).
    */
   get_user_bots_detailed: ({user}: {user: string}, options?: MethodOptions) => Promise<AssembledTransaction<Array<BotNFT>>>
+
+  /**
+   * Return the next bot ID to be assigned. Use as the exclusive upper bound
+   * when paginating with `get_bots_range` (#391).
+   */
+  next_id: (options?: MethodOptions) => Promise<AssembledTransaction<u64>>
+
+  /**
+   * Return up to `limit` existing bots in `[start_id, start_id + limit)`,
+   * skipping any missing IDs. `limit` must not exceed 100 (#391).
+   */
+  get_bots_range: ({start_id, limit}: {start_id: u64, limit: u32}, options?: MethodOptions) => Promise<AssembledTransaction<Result<Array<BotNFT>>>>
 
   /**
    * Construct and simulate a get_user transaction. Returns an `AssembledTransaction` object which will have a `result` field containing the result of the simulation. If this transaction changes contract state, you will need to call `signAndSend()` on the returned object.

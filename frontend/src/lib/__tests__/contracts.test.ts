@@ -640,37 +640,32 @@ describe("getUserBotsDetailed (#483)", () => {
 });
 
 // ---------------------------------------------------------------------------
-// getAllTiers (#478) — tier economics come from the contract, not the client
+// getAllTiers (#478, AM-072) -- single all_tiers call replaces N get_tier_info
 // ---------------------------------------------------------------------------
 describe("getAllTiers (#478)", () => {
-  // Decoded `get_tier_info` results, keyed by the BotTier u32 discriminant.
-  const contractTiers: Record<number, [string, bigint, bigint]> = {
-    0: ["Basic Bot", 1n, 0n],
-    1: ["Bronze Bot", 5n, 5_000_000_000n],
-    2: ["Silver Bot", 25n, 20_000_000_000n],
-    3: ["Gold Bot", 100n, 75_000_000_000n],
-    4: ["Diamond Bot", 500n, 250_000_000_000n],
-  };
+  // Decoded all_tiers response: array of TierInfo structs in tier order.
+  const allTiersResponse = [
+    { name: "Basic Bot", rate: 1n, price: 0n },
+    { name: "Bronze Bot", rate: 5n, price: 5_000_000_000n },
+    { name: "Silver Bot", rate: 25n, price: 20_000_000_000n },
+    { name: "Gold Bot", rate: 100n, price: 75_000_000_000n },
+    { name: "Diamond Bot", rate: 500n, price: 250_000_000_000n },
+  ];
 
   beforeEach(() => {
-    mockSimulate.mockImplementation(
-      async (_contractId: string, _method: string, args: Array<{ scv: number }>) =>
-        contractTiers[args[0].scv]
-    );
+    mockSimulate.mockResolvedValue([...allTiersResponse]);
   });
 
-  it("reads every tier from get_tier_info by its u32 discriminant", async () => {
+  it("fetches all tiers with a single all_tiers call", async () => {
     const tiers = await getAllTiers("GSRC");
 
-    expect(mockSimulate).toHaveBeenCalledTimes(5);
-    for (let index = 0; index < 5; index++) {
-      expect(mockSimulate).toHaveBeenCalledWith(
-        expect.any(String),
-        "get_tier_info",
-        [{ scv: index }],
-        "GSRC"
-      );
-    }
+    expect(mockSimulate).toHaveBeenCalledTimes(1);
+    expect(mockSimulate).toHaveBeenCalledWith(
+      expect.any(String),
+      "all_tiers",
+      [],
+      "GSRC"
+    );
     expect(tiers.Basic).toEqual({ tier: "Basic", name: "Basic Bot", rate: 1n, price: 0n });
     expect(tiers.Diamond).toEqual({
       tier: "Diamond",
@@ -681,19 +676,18 @@ describe("getAllTiers (#478)", () => {
   });
 
   it("reflects a contract-side rate change with no frontend change", async () => {
-    contractTiers[4] = ["Diamond Bot", 750n, 250_000_000_000n];
-    try {
-      const tiers = await getAllTiers("GSRC");
-      expect(tiers.Diamond.rate).toBe(750n);
-    } finally {
-      contractTiers[4] = ["Diamond Bot", 500n, 250_000_000_000n];
-    }
+    mockSimulate.mockResolvedValue([
+      ...allTiersResponse.slice(0, 4),
+      { name: "Diamond Bot", rate: 750n, price: 250_000_000_000n },
+    ]);
+    const tiers = await getAllTiers("GSRC");
+    expect(tiers.Diamond.rate).toBe(750n);
   });
 
-  it("throws when a tier comes back in an unexpected shape", async () => {
+  it("throws when all_tiers returns an unexpected shape", async () => {
     mockSimulate.mockResolvedValue(null);
     await expect(getAllTiers("GSRC")).rejects.toThrow(
-      "get_tier_info returned unexpected shape"
+      "all_tiers returned unexpected shape"
     );
   });
 

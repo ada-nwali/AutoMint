@@ -67,6 +67,15 @@ impl BotTier {
     }
 }
 
+/// Typed tier descriptor returned by `get_tier_info` and `all_tiers`.
+#[derive(Clone)]
+#[contracttype]
+pub struct TierInfo {
+    pub name: String,
+    pub rate: u64,
+    pub price: i128,
+}
+
 #[derive(Clone)]
 #[contracttype]
 pub struct BotNFT {
@@ -75,7 +84,9 @@ pub struct BotNFT {
     pub owner: Address,
     pub accrual_rate: u64,
     pub minted_at: u64,
-    pub name: String,
+    /// Owner-settable nickname (max 24 bytes). None when unset; callers that
+    /// need a display name fall back to `tier.name()`.
+    pub nickname: Option<String>,
     /// Deterministic variant (0..=7) assigned at mint, used for rarity.
     pub variant: u32,
     /// Deterministic bonus bps (0..500) on top of the tier base accrual rate.
@@ -107,6 +118,8 @@ pub enum BotNFTError {
     NotInitialized = 8,
     SupplyCapExceeded = 9,
     BatchTooLarge = 10,
+    NicknameTooLong = 11,
+    RangeLimitExceeded = 12,
 }
 
 const LEDGER_BUMP: u32 = 120960;
@@ -120,6 +133,8 @@ const MAX_BATCH_SIZE: u64 = 50;
 /// compute budget; callers with more bots paginate via `get_user_bots` +
 /// `get_bot` (#483).
 const MAX_DETAILED_BOTS: usize = 50;
+/// Maximum `limit` accepted by `get_bots_range` (#391).
+const MAX_RANGE_LIMIT: u32 = 100;
 
 #[contract]
 pub struct BotNFTContract;
@@ -220,7 +235,6 @@ impl BotNFTContract {
         is_grant: bool,
     ) -> Result<u64, BotNFTError> {
         let bot_id = Self::get_next_id(env);
-        let name = tier.name(env);
         let (variant, bonus_bps) =
             Self::derive_traits(env, bot_id, env.ledger().timestamp(), owner);
         // Effective accrual rate = base rate + deterministic bonus.
@@ -232,7 +246,7 @@ impl BotNFTContract {
             owner: owner.clone(),
             accrual_rate: effective,
             minted_at: env.ledger().timestamp(),
-            name,
+            nickname: None,
             variant,
             bonus_bps,
         };
@@ -308,6 +322,26 @@ impl BotNFTContract {
             .persistent()
             .get(&DataKey::Bot(bot_id))
             .ok_or(BotNFTError::BotNotFound)
+    }
+
+    /// Set or clear the owner-chosen nickname for a bot. Max 24 bytes; pass
+    /// an empty string to clear. Only the current owner may rename.
+    pub fn rename_bot(env: Env, bot_id: u64, name: String) -> Result<(), BotNFTError> {
+        let mut bot: BotNFT = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Bot(bot_id))
+            .ok_or(BotNFTError::BotNotFound)?;
+        bot.owner.require_auth();
+        if name.len() > 24 {
+            return Err(BotNFTError::NicknameTooLong);
+        }
+        bot.nickname = if name.len() == 0 { None } else { Some(name) };
+        env.storage().persistent().set(&DataKey::Bot(bot_id), &bot);
+        env.storage()
+            .persistent()
+            .extend_ttl(&DataKey::Bot(bot_id), LEDGER_THRESHOLD, LEDGER_BUMP);
+        Ok(())
     }
 
     /// Off-chain verifiable descriptor. The traits are derived deterministically
@@ -393,8 +427,66 @@ impl BotNFTContract {
         total
     }
 
-    pub fn get_tier_info(env: Env, tier: BotTier) -> (String, u64, i128) {
-        (tier.name(&env), tier.rate(), tier.price())
+    /// Return the next bot ID that will be assigned. Callers use this as the
+    /// exclusive upper bound when paginating with `get_bots_range` (#391).
+    pub fn next_id(env: Env) -> u64 {
+        env.storage()
+            .instance()
+            .get(&DataKey::NextId)
+            .unwrap_or(1)
+    }
+
+    /// Return up to `limit` existing bots whose IDs are in `[start_id, start_id + limit)`,
+    /// skipping any IDs that have no stored entry (gaps from burns or not-yet-minted
+    /// IDs). `limit` must not exceed `MAX_RANGE_LIMIT` (100); returns
+    /// `RangeLimitExceeded` otherwise (#391).
+    pub fn get_bots_range(
+        env: Env,
+        start_id: u64,
+        limit: u32,
+    ) -> Result<Vec<BotNFT>, BotNFTError> {
+        if limit > MAX_RANGE_LIMIT {
+            return Err(BotNFTError::RangeLimitExceeded);
+        }
+        let mut bots = Vec::new(&env);
+        for offset in 0..limit as u64 {
+            let id = start_id.saturating_add(offset);
+            if let Some(bot) = env
+                .storage()
+                .persistent()
+                .get::<_, BotNFT>(&DataKey::Bot(id))
+            {
+                bots.push_back(bot);
+            }
+        }
+        Ok(bots)
+    }
+
+    pub fn get_tier_info(env: Env, tier: BotTier) -> TierInfo {
+        TierInfo {
+            name: tier.name(&env),
+            rate: tier.rate(),
+            price: tier.price(),
+        }
+    }
+
+    pub fn all_tiers(env: Env) -> Vec<TierInfo> {
+        let tiers = [
+            BotTier::Basic,
+            BotTier::Bronze,
+            BotTier::Silver,
+            BotTier::Gold,
+            BotTier::Diamond,
+        ];
+        let mut result = Vec::new(&env);
+        for tier in tiers.iter() {
+            result.push_back(TierInfo {
+                name: tier.name(&env),
+                rate: tier.rate(),
+                price: tier.price(),
+            });
+        }
+        result
     }
 
     fn get_next_id(env: &Env) -> u64 {
@@ -670,9 +762,9 @@ mod test {
             25 + 25 * premium_bot.bonus_bps as u64 / 10000
         );
 
-        assert_eq!(basic_bot.name, String::from_str(&env, "Basic Bot"));
-        assert_eq!(advanced_bot.name, String::from_str(&env, "Bronze Bot"));
-        assert_eq!(premium_bot.name, String::from_str(&env, "Silver Bot"));
+        assert_eq!(basic_bot.nickname, None);
+        assert_eq!(advanced_bot.nickname, None);
+        assert_eq!(premium_bot.nickname, None);
 
         assert_eq!(basic_bot.tier, BotTier::Basic);
         assert_eq!(advanced_bot.tier, BotTier::Bronze);
@@ -930,6 +1022,77 @@ mod test {
         assert_eq!(client.get_user_total_rate(&bob), 1);
     }
 
+    // --- #391: get_bots_range / next_id ---
+
+    #[test]
+    fn test_next_id_starts_at_one_before_any_mint() {
+        let (_env, _admin, _registry, _token, client) = setup();
+        // setup() mints one bot (id=1), so next_id should be 2.
+        assert_eq!(client.next_id(), 2);
+    }
+
+    #[test]
+    fn test_get_bots_range_returns_existing_bots_in_order() {
+        let (env, _admin, registry, _token, client) = setup();
+        let user = Address::generate(&env);
+        register_user(&env, &registry, &user, "user1");
+        // setup() already minted id=1; mint two more.
+        client.mint_basic(&user);
+        client.mint_basic(&user);
+        // IDs 1, 2, 3 now exist.
+        let bots = client.get_bots_range(&1, &3).unwrap();
+        assert_eq!(bots.len(), 3);
+        assert_eq!(bots.get(0).unwrap().id, 1);
+        assert_eq!(bots.get(1).unwrap().id, 2);
+        assert_eq!(bots.get(2).unwrap().id, 3);
+    }
+
+    #[test]
+    fn test_get_bots_range_skips_gaps() {
+        let (env, _admin, registry, _token, client) = setup();
+        let user = Address::generate(&env);
+        register_user(&env, &registry, &user, "user1");
+        client.mint_basic(&user); // id=2
+        client.mint_basic(&user); // id=3
+        // Ask for ids 1..=5; id 4 and 5 don't exist yet — should be silently skipped.
+        let bots = client.get_bots_range(&1, &5).unwrap();
+        assert_eq!(bots.len(), 3);
+        assert_eq!(bots.get(0).unwrap().id, 1);
+        assert_eq!(bots.get(2).unwrap().id, 3);
+    }
+
+    #[test]
+    fn test_get_bots_range_empty_when_no_bots_in_window() {
+        let (_env, _admin, _registry, _token, client) = setup();
+        // start beyond any minted id.
+        let bots = client.get_bots_range(&1000, &10).unwrap();
+        assert_eq!(bots.len(), 0);
+    }
+
+    #[test]
+    fn test_get_bots_range_over_cap_returns_error() {
+        let (_env, _admin, _registry, _token, client) = setup();
+        let result = client.try_get_bots_range(&1, &101);
+        assert!(matches!(result, Err(Ok(BotNFTError::RangeLimitExceeded))));
+    }
+
+    #[test]
+    fn test_get_bots_range_exactly_at_cap_succeeds() {
+        let (_env, _admin, _registry, _token, client) = setup();
+        let result = client.try_get_bots_range(&1, &100);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_next_id_advances_with_each_mint() {
+        let (env, _admin, registry, _token, client) = setup();
+        let user = Address::generate(&env);
+        register_user(&env, &registry, &user, "user1");
+        let before = client.next_id();
+        client.mint_basic(&user);
+        assert_eq!(client.next_id(), before + 1);
+    }
+
     #[test]
     fn test_admin_returns_initialized_admin() {
         let (_env, admin, _registry, _token, client) = setup();
@@ -989,10 +1152,10 @@ mod test {
     fn test_get_tier_info() {
         let (env, _admin, _registry, _token, client) = setup();
 
-        assert_eq!(
-            client.get_tier_info(&BotTier::Gold),
-            (String::from_str(&env, "Gold Bot"), 100, 7500_0000000)
-        );
+        let info = client.get_tier_info(&BotTier::Gold);
+        assert_eq!(info.name, String::from_str(&env, "Gold Bot"));
+        assert_eq!(info.rate, 100);
+        assert_eq!(info.price, 7500_0000000);
     }
 
     #[test]
@@ -1030,6 +1193,71 @@ mod test {
         assert_eq!(BotNFTError::NotOwner as u32, 6);
         assert_eq!(BotNFTError::InsufficientFunds as u32, 7);
         assert_eq!(BotNFTError::NotInitialized as u32, 8);
+        assert_eq!(BotNFTError::NicknameTooLong as u32, 11);
+    }
+
+    #[test]
+    fn test_rename_bot_sets_nickname() {
+        let (env, _admin, registry, _token, client) = setup();
+        let user = Address::generate(&env);
+        register_user(&env, &registry, &user, "owner");
+        let bot_id = client.mint_basic(&user);
+
+        assert_eq!(client.get_bot(&bot_id).nickname, None);
+
+        client.rename_bot(&bot_id, &String::from_str(&env, "Sparky"));
+        assert_eq!(
+            client.get_bot(&bot_id).nickname,
+            Some(String::from_str(&env, "Sparky"))
+        );
+    }
+
+    #[test]
+    fn test_rename_bot_clears_with_empty_string() {
+        let (env, _admin, registry, _token, client) = setup();
+        let user = Address::generate(&env);
+        register_user(&env, &registry, &user, "owner");
+        let bot_id = client.mint_basic(&user);
+
+        client.rename_bot(&bot_id, &String::from_str(&env, "Temp"));
+        client.rename_bot(&bot_id, &String::from_str(&env, ""));
+        assert_eq!(client.get_bot(&bot_id).nickname, None);
+    }
+
+    #[test]
+    fn test_rename_bot_rejects_oversized_name() {
+        let (env, _admin, registry, _token, client) = setup();
+        let user = Address::generate(&env);
+        register_user(&env, &registry, &user, "owner");
+        let bot_id = client.mint_basic(&user);
+
+        // 25 bytes — one over the limit.
+        let too_long = String::from_str(&env, "AAAAAAAAAAAAAAAAAAAAAAAAA");
+        let result = client.try_rename_bot(&bot_id, &too_long);
+        assert!(matches!(result, Err(Ok(BotNFTError::NicknameTooLong))));
+    }
+
+    #[test]
+    fn test_rename_bot_rejects_non_owner() {
+        let (env, _admin, registry, _token, client) = setup();
+        let alice = Address::generate(&env);
+        let bob = Address::generate(&env);
+        register_user(&env, &registry, &alice, "alice");
+        register_user(&env, &registry, &bob, "bob");
+        let bot_id = client.mint_basic(&alice);
+
+        let result = client
+            .mock_auths(&[MockAuth {
+                address: &bob,
+                invoke: &MockAuthInvoke {
+                    contract: &client.address,
+                    fn_name: "rename_bot",
+                    args: (bot_id, String::from_str(&env, "Hacked")).into_val(&env),
+                    sub_invokes: &[],
+                },
+            }])
+            .try_rename_bot(&bot_id, &String::from_str(&env, "Hacked"));
+        assert!(result.is_err());
     }
 
     #[test]
@@ -1132,29 +1360,51 @@ mod test {
         let (env, _admin, _registry, _token, client) = setup();
 
         let basic = client.get_tier_info(&BotTier::Basic);
-        assert_eq!(basic.0, String::from_str(&env, "Basic Bot"));
-        assert_eq!(basic.1, 1);
-        assert_eq!(basic.2, 0);
+        assert_eq!(basic.name, String::from_str(&env, "Basic Bot"));
+        assert_eq!(basic.rate, 1);
+        assert_eq!(basic.price, 0);
 
         let bronze = client.get_tier_info(&BotTier::Bronze);
-        assert_eq!(bronze.0, String::from_str(&env, "Bronze Bot"));
-        assert_eq!(bronze.1, 5);
-        assert_eq!(bronze.2, 500_0000000);
+        assert_eq!(bronze.name, String::from_str(&env, "Bronze Bot"));
+        assert_eq!(bronze.rate, 5);
+        assert_eq!(bronze.price, 500_0000000);
 
         let silver = client.get_tier_info(&BotTier::Silver);
-        assert_eq!(silver.0, String::from_str(&env, "Silver Bot"));
-        assert_eq!(silver.1, 25);
-        assert_eq!(silver.2, 2000_0000000);
+        assert_eq!(silver.name, String::from_str(&env, "Silver Bot"));
+        assert_eq!(silver.rate, 25);
+        assert_eq!(silver.price, 2000_0000000);
 
         let gold = client.get_tier_info(&BotTier::Gold);
-        assert_eq!(gold.0, String::from_str(&env, "Gold Bot"));
-        assert_eq!(gold.1, 100);
-        assert_eq!(gold.2, 7500_0000000);
+        assert_eq!(gold.name, String::from_str(&env, "Gold Bot"));
+        assert_eq!(gold.rate, 100);
+        assert_eq!(gold.price, 7500_0000000);
 
         let diamond = client.get_tier_info(&BotTier::Diamond);
-        assert_eq!(diamond.0, String::from_str(&env, "Diamond Bot"));
-        assert_eq!(diamond.1, 500);
-        assert_eq!(diamond.2, 25000_0000000);
+        assert_eq!(diamond.name, String::from_str(&env, "Diamond Bot"));
+        assert_eq!(diamond.rate, 500);
+        assert_eq!(diamond.price, 25000_0000000);
+    }
+
+    #[test]
+    fn test_all_tiers() {
+        let (env, _admin, _registry, _token, client) = setup();
+
+        let all = client.all_tiers();
+        assert_eq!(all.len(), 5);
+
+        let basic = all.get(0).unwrap();
+        assert_eq!(basic.name, String::from_str(&env, "Basic Bot"));
+        assert_eq!(basic.rate, 1);
+        assert_eq!(basic.price, 0);
+
+        let bronze = all.get(1).unwrap();
+        assert_eq!(bronze.name, String::from_str(&env, "Bronze Bot"));
+        assert_eq!(bronze.rate, 5);
+
+        let diamond = all.get(4).unwrap();
+        assert_eq!(diamond.name, String::from_str(&env, "Diamond Bot"));
+        assert_eq!(diamond.rate, 500);
+        assert_eq!(diamond.price, 25000_0000000);
     }
 
     // --- Issue #544: storage TTL / archival coverage ---
