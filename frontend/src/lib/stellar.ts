@@ -342,21 +342,32 @@ function simulationKey(
  *  - Concurrently identical simulations `(contractId, method, args)` share
  *    one in-flight promise; the entry is removed as soon as it settles.
  *
- * @throws Error when the simulation fails or returns no value.
+ * Callers declare the shape they expect through `T`
+ * (`simulateContractCall<bigint>(...)`); the decode itself is not validated
+ * against it, so callers that cannot trust the contract still narrow the
+ * result (e.g. `Array.isArray`) before use.
+ *
+ * A simulation succeeded when the RPC returned a `result` — the truthiness of
+ * the decoded value says nothing about it, so a function returning `0`,
+ * `false`, `""` or `[]` decodes to exactly that. A function returning `()`
+ * (or an `Option::None`, which Soroban encodes as void) resolves to
+ * `undefined` rather than throwing.
+ *
+ * @throws Error when the simulation fails or the RPC returns no `result`.
  */
-export async function simulateContractCall(
+export async function simulateContractCall<T = unknown>(
   contractId: string,
   method: string,
   args: xdr.ScVal[],
   sourceAddress: string
-): Promise<unknown> {
+): Promise<T | undefined> {
   // Deduplicate concurrent identical simulations (#482): callers sharing a
   // (contractId, method, args) key await the same in-flight promise.
   const key = simulationKey(contractId, method, args);
   const inflight = _simulationInflight.get(key);
-  if (inflight) return inflight;
+  if (inflight) return inflight as Promise<T | undefined>;
 
-  const run = (async (): Promise<unknown> => {
+  const run = (async (): Promise<T | undefined> => {
     const contract = new Contract(contractId);
     const account = await getAccountCached(sourceAddress);
 
@@ -374,11 +385,16 @@ export async function simulateContractCall(
       throw new Error(`Simulation failed for ${method}: ${result.error}`);
     }
 
-    if (!result.result?.retval) {
-      throw new Error(`No return value from simulation of ${method}`);
+    if (!result.result) {
+      throw new Error(`No result from simulation of ${method}`);
     }
 
-    return scValToNative(result.result.retval);
+    const { retval } = result.result;
+    if (!retval || retval.switch().name === "scvVoid") {
+      return undefined;
+    }
+
+    return scValToNative(retval) as T;
   })();
 
   _simulationInflight.set(key, run);

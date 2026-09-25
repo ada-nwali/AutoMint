@@ -4,6 +4,7 @@ import { Skeleton } from "@/components/ui/Skeleton";
 import { ErrorState } from "@/components/ui/ErrorState";
 import { useWalletStore, selectPublicKey } from "@/store/walletStore";
 import { useProfile, useBots } from "@/hooks/useAccrual";
+import { TxHistoryPanel } from "@/components/profile/TxHistoryPanel";
 
 export default function ProfilePage() {
   const publicKey = useWalletStore(selectPublicKey);
@@ -175,6 +176,8 @@ export default function ProfilePage() {
           </div>
         </div>
       )}
+
+      <TxHistoryPanel account={publicKey} />
     </div>
   );
 }
