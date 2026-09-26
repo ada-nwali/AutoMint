@@ -201,6 +201,39 @@ impl AccrualContract {
         Ok(elapsed.saturating_mul(accrual.rate as u128) / 3600)
     }
 
+    /// Seconds until the next AMT token will be earned. Returns 0 if the user
+    /// already has enough carry points for the next token or if their rate is 0.
+    /// Computed from carry_points, points_per_amt, and accrual rate.
+    pub fn seconds_to_next_amt(env: Env, user: Address) -> Result<u64, AccrualError> {
+        let accrual: UserAccrual = env
+            .storage()
+            .persistent()
+            .get(&DataKey::UserAccrual(user))
+            .ok_or(AccrualError::NotStarted)?;
+
+        let config: Config = env
+            .storage()
+            .instance()
+            .get(&DataKey::Config)
+            .ok_or(AccrualError::NotInitialized)?;
+
+        if accrual.rate == 0 {
+            return Ok(0);
+        }
+
+        let points_needed = config
+            .points_per_amt
+            .saturating_sub(accrual.carry_points);
+
+        if points_needed == 0 {
+            return Ok(0);
+        }
+
+        let seconds = ((points_needed as u128 * 3600).saturating_add(accrual.rate as u128 - 1))
+            / (accrual.rate as u128);
+        Ok(seconds as u64)
+    }
+
     pub fn get_accrual_state(env: Env, user: Address) -> Option<AccrualState> {
         read_accrual_state(&env, &user)
     }
