@@ -1853,3 +1853,185 @@ fn test_marketplace_outage_does_not_block_transfer() {
     assert!(result.is_ok());
     assert_eq!(h.bot.get_bot(&bot_id).owner, recipient);
 }
+
+// ── #432 sales statistics ────────────────────────────────────────────────────
+
+#[test]
+fn test_tier_stats_follow_a_scripted_sequence_of_sales() {
+    let h = setup();
+    let seller = Address::generate(&h.env);
+    let buyer = Address::generate(&h.env);
+    h.token.mint(&buyer, &1000_0000000_i128);
+
+    let stats = h.mkt.tier_stats(&BotTier::Basic);
+    assert_eq!(stats.volume, 0);
+    assert_eq!(stats.sale_count, 0);
+    assert_eq!(stats.floor_price, 0);
+
+    let bot_a = h.bot.mint_basic(&seller);
+    let bot_b = h.bot.mint_basic(&seller);
+    let cheap = h.mkt.list_bot(&seller, &bot_a, &40_0000000_i128, &h.token.address);
+    let dear = h.mkt.list_bot(&seller, &bot_b, &60_0000000_i128, &h.token.address);
+
+    // The floor is the cheapest active listing.
+    assert_eq!(h.mkt.tier_stats(&BotTier::Basic).floor_price, 40_0000000_i128);
+
+    // Buying the cheapest moves the floor to the next one.
+    h.mkt.buy_bot(&buyer, &cheap);
+    let stats = h.mkt.tier_stats(&BotTier::Basic);
+    assert_eq!(stats.volume, 40_0000000_i128);
+    assert_eq!(stats.sale_count, 1);
+    assert_eq!(stats.last_sale_price, 40_0000000_i128);
+    assert_eq!(stats.floor_price, 60_0000000_i128);
+
+    // Buying the last listing leaves no floor.
+    h.mkt.buy_bot(&buyer, &dear);
+    let stats = h.mkt.tier_stats(&BotTier::Basic);
+    assert_eq!(stats.volume, 100_0000000_i128);
+    assert_eq!(stats.sale_count, 2);
+    assert_eq!(stats.last_sale_price, 60_0000000_i128);
+    assert_eq!(stats.floor_price, 0);
+
+    // Other tiers are untouched, and market_stats reports every tier.
+    assert_eq!(h.mkt.tier_stats(&BotTier::Gold).sale_count, 0);
+    assert_eq!(h.mkt.market_stats().len(), 5);
+}
+
+#[test]
+fn test_floor_updates_when_the_cheapest_listing_is_cancelled_or_repriced() {
+    let h = setup();
+    let seller = Address::generate(&h.env);
+    let bot_a = h.bot.mint_basic(&seller);
+    let bot_b = h.bot.mint_basic(&seller);
+    let cheap = h.mkt.list_bot(&seller, &bot_a, &40_0000000_i128, &h.token.address);
+    let dear = h.mkt.list_bot(&seller, &bot_b, &60_0000000_i128, &h.token.address);
+
+    // Repricing the cheapest above the other moves the floor.
+    h.mkt.update_price(&seller, &cheap, &80_0000000_i128);
+    assert_eq!(h.mkt.tier_stats(&BotTier::Basic).floor_price, 60_0000000_i128);
+
+    // Repricing below the floor lowers it.
+    h.mkt.update_price(&seller, &dear, &50_0000000_i128);
+    assert_eq!(h.mkt.tier_stats(&BotTier::Basic).floor_price, 50_0000000_i128);
+
+    // Cancelling the floor listing falls back to the remaining one.
+    h.mkt.cancel_listing(&seller, &dear);
+    assert_eq!(h.mkt.tier_stats(&BotTier::Basic).floor_price, 80_0000000_i128);
+}
+
+// ── #433 check ordering ──────────────────────────────────────────────────────
+
+#[test]
+fn test_non_seller_gets_unauthorized_whatever_the_listing_state() {
+    let h = setup();
+    let seller = Address::generate(&h.env);
+    let stranger = Address::generate(&h.env);
+    let bot_id = h.bot.mint_basic(&seller);
+    let listing_id = h
+        .mkt
+        .list_bot(&seller, &bot_id, &100_0000000_i128, &h.token.address);
+
+    // Active listing.
+    assert_eq!(
+        h.mkt.try_cancel_listing(&stranger, &listing_id),
+        Err(Ok(MarketplaceError::Unauthorized))
+    );
+    assert_eq!(
+        h.mkt.try_update_price(&stranger, &listing_id, &200_0000000_i128),
+        Err(Ok(MarketplaceError::Unauthorized))
+    );
+
+    // Inactive listing: still Unauthorized, not ListingNotActive.
+    h.mkt.cancel_listing(&seller, &listing_id);
+    assert_eq!(
+        h.mkt.try_cancel_listing(&stranger, &listing_id),
+        Err(Ok(MarketplaceError::Unauthorized))
+    );
+    assert_eq!(
+        h.mkt.try_update_price(&stranger, &listing_id, &200_0000000_i128),
+        Err(Ok(MarketplaceError::Unauthorized))
+    );
+
+    // The seller does learn that the listing is no longer active.
+    assert_eq!(
+        h.mkt.try_cancel_listing(&seller, &listing_id),
+        Err(Ok(MarketplaceError::ListingNotActive))
+    );
+}
+
+#[test]
+fn test_seller_cannot_buy_own_listing_whatever_its_state() {
+    let h = setup();
+    let seller = Address::generate(&h.env);
+    let bot_id = h.bot.mint_basic(&seller);
+    let listing_id = h
+        .mkt
+        .list_bot(&seller, &bot_id, &100_0000000_i128, &h.token.address);
+    h.mkt.cancel_listing(&seller, &listing_id);
+
+    assert_eq!(
+        h.mkt.try_buy_bot(&seller, &listing_id),
+        Err(Ok(MarketplaceError::SelfPurchase))
+    );
+}
+
+// ── #434 pause and two-step admin transfer ───────────────────────────────────
+
+#[test]
+fn test_pause_blocks_trading_but_not_cancel_listing() {
+    let h = setup();
+    let seller = Address::generate(&h.env);
+    let buyer = Address::generate(&h.env);
+    h.token.mint(&buyer, &1000_0000000_i128);
+    let bot_a = h.bot.mint_basic(&seller);
+    let bot_b = h.bot.mint_basic(&seller);
+    let listing_id = h
+        .mkt
+        .list_bot(&seller, &bot_a, &100_0000000_i128, &h.token.address);
+
+    h.mkt.pause();
+    assert!(h.mkt.is_paused());
+
+    assert_eq!(
+        h.mkt.try_list_bot(&seller, &bot_b, &100_0000000_i128, &h.token.address),
+        Err(Ok(MarketplaceError::ContractPaused))
+    );
+    assert_eq!(
+        h.mkt.try_buy_bot(&buyer, &listing_id),
+        Err(Ok(MarketplaceError::ContractPaused))
+    );
+    assert_eq!(
+        h.mkt.try_update_price(&seller, &listing_id, &120_0000000_i128),
+        Err(Ok(MarketplaceError::ContractPaused))
+    );
+
+    // The escape hatch: a seller can still retrieve the escrowed bot.
+    h.mkt.cancel_listing(&seller, &listing_id);
+    assert_eq!(h.bot.get_bot(&bot_a).owner, seller);
+
+    // Trading resumes after unpause.
+    h.mkt.unpause();
+    assert!(!h.mkt.is_paused());
+    h.mkt
+        .list_bot(&seller, &bot_b, &100_0000000_i128, &h.token.address);
+}
+
+#[test]
+fn test_admin_transfer_takes_two_steps() {
+    let h = setup();
+    let new_admin = Address::generate(&h.env);
+
+    assert_eq!(
+        h.mkt.try_accept_admin(),
+        Err(Ok(MarketplaceError::NoPendingAdmin))
+    );
+
+    h.mkt.propose_admin(&new_admin);
+    assert_eq!(h.mkt.pending_admin(), Some(new_admin.clone()));
+    // Proposing alone changes nothing.
+    assert_eq!(h.mkt.config().admin, h.admin);
+
+    h.mkt.accept_admin();
+    assert_eq!(h.mkt.config().admin, new_admin);
+    assert_eq!(h.mkt.pending_admin(), None);
+}

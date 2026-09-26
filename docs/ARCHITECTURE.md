@@ -153,6 +153,7 @@ The table below specifies the required authentication signer, verification mecha
 | | `start_accrual` | User | `user.require_auth()` | Starts rate tracking at current ledger time |
 | | `pending_points` | None | Public view | Calculates `(elapsed * rate) / 3600` |
 | | `get_accrual_state` | None | Public view | Queries user's last claim time & points |
+| | `get_accrual_states` | None | Public view | Accrual states for up to 50 users in one call (`None` for unknown users) |
 | | `claim` | User | `user.require_auth()` | Claims pending points & triggers mint if >= 100 |
 | | `config` | None | Public view | Returns contract configuration |
 | | `admin` | None | Public view | Returns contract admin address |
@@ -163,6 +164,10 @@ The table below specifies the required authentication signer, verification mecha
 | | `get_active_listings` | None | Public view | Paginated query of active listings |
 | | `get_user_listings` | None | Public view | Fetch all listings created by user |
 | | `buy_bot` | Buyer | `buyer.require_auth()` | Transfers NFT to buyer & payments to seller/admin |
+| | `update_price` | Seller | `seller.require_auth()` | Changes an active listing's price |
+| | `propose_admin` / `accept_admin` | Admin / New admin | `require_auth()` | Two-step admin transfer |
+| | `pause` / `unpause` | Admin | `admin.require_auth()` | Blocks/resumes `list_bot`, `buy_bot`, `update_price`; `cancel_listing` always works |
+| | `tier_stats` / `market_stats` | None | Public view | Per-tier volume, sale count, last sale price and floor |
 | | `config` | None | Public view | Returns contract configuration |
 | **AMT Token** | `initialize` | Admin | `admin.require_auth()` | Sets decimals (7), name, symbol, admin |
 | | `allowance` | None | Public view | Returns non-expired allowance amount |

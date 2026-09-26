@@ -26,6 +26,7 @@ import type {
   BotTier,
   MarketplaceListing,
   AccrualState,
+  TierStats,
   TierInfo,
 } from "@/types";
 import { TIER_ORDER } from "@/types";
@@ -598,6 +599,30 @@ export async function getActiveListings(
 }
 
 /**
+ * Get sales statistics (volume, sale count, last sale price, floor) for every
+ * tier from the marketplace (#432). The contract returns one entry per tier in
+ * tier order, so the tier is taken from position.
+ */
+export async function getMarketStats(sourceAddress?: string): Promise<TierStats[]> {
+  const raw = await simulateContractCall<Record<string, unknown>[]>(
+    CONTRACT_ADDRESSES.marketplace,
+    "market_stats",
+    [],
+    defaultSource(sourceAddress)
+  );
+  if (!Array.isArray(raw)) {
+    throw new Error(`market_stats returned unexpected type ${typeof raw}; expected array`);
+  }
+  return raw.map((entry, index) => ({
+    tier: TIER_ORDER[index] ?? "Basic",
+    volume: toBigInt(entry.volume, "volume"),
+    sale_count: toBigInt(entry.sale_count, "sale_count"),
+    last_sale_price: toBigInt(entry.last_sale_price, "last_sale_price"),
+    floor_price: toBigInt(entry.floor_price, "floor_price"),
+  }));
+}
+
+/**
  * Get marketplace listings for a specific user.
  *
  * Errors propagate to the caller so React Query's `isError` path fires on an
@@ -787,6 +812,50 @@ export async function getAccrualState(userAddress: string): Promise<AccrualState
       "lifetime_points"
     ),
   };
+}
+
+/** Most addresses `get_accrual_states` accepts in one call. */
+export const MAX_ACCRUAL_BATCH = 50;
+
+function parseAccrualState(raw: Record<string, unknown> | null | undefined): AccrualState | null {
+  if (!raw) return null;
+  return {
+    last_claim_ts: toBigInt(raw.last_claim_ts, "last_claim_ts"),
+    carry_points: toBigInt(raw.carry_points ?? 0n, "carry_points"),
+    lifetime_points: toBigInt(raw.lifetime_points ?? 0n, "lifetime_points"),
+  };
+}
+
+/**
+ * Get accrual states for many users in a single simulation (#420). Results are
+ * in the same order as `userAddresses`; an address with no accrual record maps
+ * to `null`. Errors propagate so React Query's `isError` path fires.
+ */
+export async function getAccrualStates(
+  userAddresses: string[]
+): Promise<(AccrualState | null)[]> {
+  if (userAddresses.length === 0) return [];
+  if (userAddresses.length > MAX_ACCRUAL_BATCH) {
+    throw new Error(
+      `getAccrualStates accepts at most ${MAX_ACCRUAL_BATCH} addresses, got ${userAddresses.length}`
+    );
+  }
+  const raw = await simulateContractCall<(Record<string, unknown> | null)[]>(
+    CONTRACT_ADDRESSES.accrual,
+    "get_accrual_states",
+    [
+      xdr.ScVal.scvVec(
+        userAddresses.map((address) => nativeToScVal(address, { type: "address" }))
+      ),
+    ],
+    userAddresses[0] ?? defaultSource()
+  );
+  if (!Array.isArray(raw)) {
+    throw new Error(
+      `get_accrual_states returned unexpected type ${typeof raw}; expected array`
+    );
+  }
+  return raw.map((entry) => parseAccrualState(entry));
 }
 
 /**

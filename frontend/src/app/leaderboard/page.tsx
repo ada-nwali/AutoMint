@@ -5,6 +5,7 @@ import dynamic from "next/dynamic";
 import { toast } from "sonner";
 import { Trophy } from "lucide-react";
 import { useLeaderboard, useRank } from "@/hooks/useLeaderboard";
+import { useLeaderboardAccruals } from "@/hooks/useLeaderboardAccruals";
 import { useWalletStore, selectPublicKey } from "@/store/walletStore";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { ErrorState } from "@/components/ui/ErrorState";
@@ -18,6 +19,10 @@ const LeaderboardTable = dynamic(
 
 export default function LeaderboardPage() {
   const { data: leaderboardData, isLoading, isError, error, refetch, isRefetching } = useLeaderboard();
+  // One accrual call per poll for every visible row (#420).
+  const { data: accrualStates } = useLeaderboardAccruals(
+    (leaderboardData ?? []).map((user) => user.address),
+  );
   const publicKey = useWalletStore(selectPublicKey);
   // #506 — the table only holds the top 50; this is how everyone else finds
   // out where they stand. Disabled while no wallet is connected.
@@ -101,6 +106,7 @@ export default function LeaderboardPage() {
           users={leaderboardData.map((user, index) => ({ ...user, rank: index + 1 }))}
           currentAddress={publicKey}
           currentUserRank={currentUserRank ?? null}
+          accrualStates={accrualStates}
         />
       )}
     </main>

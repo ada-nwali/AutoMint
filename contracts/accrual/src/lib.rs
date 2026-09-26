@@ -3,6 +3,7 @@
 #![no_std]
 use soroban_sdk::{
     contract, contractclient, contracterror, contractimpl, contracttype, symbol_short, Address, Env,
+    Vec,
 };
 
 /// The one bot_nft entry point accrual calls. Declared locally rather than
@@ -14,7 +15,7 @@ pub trait BotNftInterface {
     fn get_user_total_rate(env: Env, user: Address) -> u64;
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq)]
 #[contracttype]
 pub struct AccrualState {
     pub last_claim_ts: u64,
@@ -37,6 +38,9 @@ pub enum DataKey {
 pub struct Config {
     pub points_per_amt: u64,
 }
+
+/// Most users a single `get_accrual_states` call accepts.
+pub const MAX_BATCH_USERS: u32 = 50;
 
 fn read_accrual_state(env: &Env, user: &Address) -> Option<AccrualState> {
     env.storage()
@@ -72,6 +76,7 @@ pub enum AccrualError {
     TokenMintFailed = 7,
     InvalidConfig = 8,
     NoBots = 9,
+    TooManyUsers = 10,
 }
 
 fn get_reg_err_code(
@@ -198,6 +203,23 @@ impl AccrualContract {
 
     pub fn get_accrual_state(env: Env, user: Address) -> Option<AccrualState> {
         read_accrual_state(&env, &user)
+    }
+
+    /// Accrual states for up to `MAX_BATCH_USERS` users in one call, in the
+    /// same order as `users`. Addresses with no accrual record map to `None`.
+    /// Lets a leaderboard poll one simulation instead of one per row (#420).
+    pub fn get_accrual_states(
+        env: Env,
+        users: Vec<Address>,
+    ) -> Result<Vec<Option<AccrualState>>, AccrualError> {
+        if users.len() > MAX_BATCH_USERS {
+            return Err(AccrualError::TooManyUsers);
+        }
+        let mut states: Vec<Option<AccrualState>> = Vec::new(&env);
+        for user in users.iter() {
+            states.push_back(read_accrual_state(&env, &user));
+        }
+        Ok(states)
     }
 
     pub fn claim(
@@ -577,6 +599,44 @@ mod test {
         assert_eq!(s2.carry_points, 0);
         assert_eq!(s2.lifetime_points, 0);
         assert!(client.get_accrual_state(&Address::generate(&env)).is_none());
+    }
+
+    #[test]
+    fn test_get_accrual_states_returns_one_entry_per_user_in_order() {
+        let (env, _admin, _registry, _token, client) = setup();
+        let started = Address::generate(&env);
+        let unknown = Address::generate(&env);
+        start_basic(&env, &client, &started);
+
+        let users = soroban_sdk::vec![&env, unknown.clone(), started.clone()];
+        let states = client.get_accrual_states(&users);
+
+        assert_eq!(states.len(), 2);
+        assert!(states.get(0).unwrap().is_none());
+        assert!(states.get(1).unwrap().is_some());
+    }
+
+    #[test]
+    fn test_get_accrual_states_rejects_more_than_the_cap() {
+        let (env, _admin, _registry, _token, client) = setup();
+        let mut users: Vec<Address> = Vec::new(&env);
+        for _ in 0..(MAX_BATCH_USERS + 1) {
+            users.push_back(Address::generate(&env));
+        }
+        assert_eq!(
+            client.try_get_accrual_states(&users),
+            Err(Ok(AccrualError::TooManyUsers))
+        );
+    }
+
+    #[test]
+    fn test_get_accrual_states_accepts_exactly_the_cap() {
+        let (env, _admin, _registry, _token, client) = setup();
+        let mut users: Vec<Address> = Vec::new(&env);
+        for _ in 0..MAX_BATCH_USERS {
+            users.push_back(Address::generate(&env));
+        }
+        assert_eq!(client.get_accrual_states(&users).len(), MAX_BATCH_USERS);
     }
 
     #[test]

@@ -1,6 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { getActiveListings, getUserListings, buildListBotArgs } from "@/lib/contracts";
+import {
+  getActiveListings,
+  getUserListings,
+  getMarketStats,
+  buildListBotArgs,
+} from "@/lib/contracts";
 import { executeTransaction, type TransactionStatus } from "@/lib/transaction";
 import { useWalletStore, selectPublicKey } from "@/store/walletStore";
 import { nativeToScVal, xdr } from "@stellar/stellar-sdk";
@@ -181,6 +186,17 @@ export function useListings() {
   return useQuery({
     queryKey: qk.listings(),
     queryFn: () => getActiveListings(),
+    refetchInterval: pollWhenVisible(),
+    staleTime: STALE_TIME.SHORT,
+    gcTime: GC_TIME.SHORT,
+  });
+}
+
+/** Per-tier sales statistics: volume, sale count, last sale price and floor (#432). */
+export function useMarketStats() {
+  return useQuery({
+    queryKey: qk.marketStats(),
+    queryFn: () => getMarketStats(),
     refetchInterval: pollWhenVisible(),
     staleTime: STALE_TIME.SHORT,
     gcTime: GC_TIME.SHORT,

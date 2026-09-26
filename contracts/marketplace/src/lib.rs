@@ -82,6 +82,30 @@
 //! permanently-broken marketplace caused by a typo in the bot_nft address.
 //! The bot_nft address is readable via `bot_nft()` getter.
 //!
+//! ## Check ordering in mutating functions (#433)
+//!
+//! `buy_bot`, `cancel_listing` and `update_price` validate in one fixed order:
+//! existence -> authorization -> state validity -> effects. A caller who is not
+//! authorized for a listing therefore always gets `Unauthorized`/`SelfPurchase`
+//! whatever the listing's state, so probing listing IDs does not reveal which
+//! are active.
+//!
+//! ## Pause and admin transfer (#434)
+//!
+//! While paused, `list_bot`, `buy_bot` and `update_price` fail with
+//! `ContractPaused`. `cancel_listing` deliberately keeps working so sellers can
+//! always retrieve their escrowed bots. Admin rotation is two-step:
+//! `propose_admin(new_admin)` then `accept_admin()` signed by the new admin.
+//!
+//! ## Sales statistics (#432)
+//!
+//! `tier_stats(tier)` and `market_stats()` expose, per bot tier, cumulative
+//! volume, sale count, last sale price and the floor (lowest active listing
+//! price, `0` when none). Volume and prices are raw base units summed across
+//! whatever currencies were used. Each list, sale, cancel or price change
+//! updates one tier's record in O(1); the floor is rescanned only when the
+//! listing that held it leaves the market or is repriced upward.
+//!
 //! ## Events
 //!
 //! The marketplace emits the following events for auditing:
@@ -101,6 +125,11 @@
 //!   Topics: ("bot_nft_updated",), Data: (old_nft, new_nft)
 //! - `admin_updated`: Emitted when admin changes.
 //!   Topics: ("admin_updated",), Data: (old_admin, new_admin)
+//! - `admin_proposed`: Emitted when an admin transfer is proposed.
+//!   Topics: ("admin_proposed",), Data: (current_admin, pending_admin)
+//! - `paused` / `unpaused`: Emitted when the admin pauses or resumes trading.
+//! - `price_upd`: Emitted when a listing price changes.
+//!   Topics: ("price_upd", seller, listing_id), Data: (old_price, new_price)
 
 use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, symbol_short, token, Address, Env, Symbol,
@@ -122,6 +151,9 @@ pub enum DataKey {
     MinPrice(Address),
     UserActiveListingCount(Address),
     ListingCap,
+    Paused,
+    PendingAdmin,
+    TierStats(BotTier),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -146,6 +178,21 @@ pub struct Purchase {
     pub price: i128,
     pub currency: Address,
     pub purchased_at: u64,
+}
+
+/// Sales statistics for one bot tier (#432).
+#[derive(Clone, Debug, PartialEq)]
+#[contracttype]
+pub struct TierStats {
+    pub tier: BotTier,
+    /// Cumulative sale volume in raw base units.
+    pub volume: i128,
+    pub sale_count: u64,
+    pub last_sale_price: i128,
+    /// Lowest active listing price for this tier; `0` when nothing is listed.
+    pub floor_price: i128,
+    /// Listing holding the floor; `0` when nothing is listed.
+    pub floor_listing_id: u64,
 }
 
 #[derive(Clone)]
@@ -176,7 +223,18 @@ pub enum MarketplaceError {
     SelfPurchase = 15,
     TooManyListings = 16,
     InvalidBotNft = 17,
+    ContractPaused = 18,
+    NoPendingAdmin = 19,
 }
+
+/// Every bot tier, in order, for per-tier reporting.
+const ALL_TIERS: [BotTier; 5] = [
+    BotTier::Basic,
+    BotTier::Bronze,
+    BotTier::Silver,
+    BotTier::Gold,
+    BotTier::Diamond,
+];
 
 const LEDGER_BUMP: u32 = 120960;
 const LEDGER_THRESHOLD: u32 = 103680;
@@ -296,6 +354,7 @@ impl MarketplaceContract {
         currency: Address,
     ) -> Result<u64, MarketplaceError> {
         seller.require_auth();
+        Self::require_not_paused(&env)?;
 
         // A listing must have a strictly positive price.
         if price <= 0 {
@@ -384,6 +443,7 @@ impl MarketplaceContract {
         env.storage()
             .instance()
             .set(&DataKey::ActiveListings, &active);
+        Self::on_listing_added(&env, &listing);
 
         let mut user_listings: Vec<u64> = env
             .storage()
@@ -421,16 +481,18 @@ impl MarketplaceContract {
 
     pub fn buy_bot(env: Env, buyer: Address, listing_id: u64) -> Result<(), MarketplaceError> {
         buyer.require_auth();
+        Self::require_not_paused(&env)?;
+        // Order: existence -> authorization -> state validity -> effects.
         let mut listing: Listing = env
             .storage()
             .persistent()
             .get(&DataKey::Listing(listing_id))
             .ok_or(MarketplaceError::ListingNotFound)?;
-        if !listing.active {
-            return Err(MarketplaceError::ListingNotActive);
-        }
         if listing.seller == buyer {
             return Err(MarketplaceError::SelfPurchase);
+        }
+        if !listing.active {
+            return Err(MarketplaceError::ListingNotActive);
         }
         let config: Config = env
             .storage()
@@ -452,6 +514,7 @@ impl MarketplaceContract {
                     .persistent()
                     .set(&DataKey::Listing(listing_id), &listing);
                 Self::remove_active_listing(&env, listing_id);
+                Self::on_listing_removed(&env, &listing);
                 return Err(MarketplaceError::ListingStale);
             }
         };
@@ -461,6 +524,7 @@ impl MarketplaceContract {
                 .persistent()
                 .set(&DataKey::Listing(listing_id), &listing);
             Self::remove_active_listing(&env, listing_id);
+            Self::on_listing_removed(&env, &listing);
             return Err(MarketplaceError::ListingStale);
         }
 
@@ -513,6 +577,8 @@ impl MarketplaceContract {
             LEDGER_BUMP,
         );
         Self::remove_active_listing(&env, listing_id);
+        Self::record_sale(&env, listing.bot_tier, listing.price)?;
+        Self::on_listing_removed(&env, &listing);
         Self::decrement_user_active_listing_count(&env, &listing.seller);
         let purchase = Purchase {
             listing_id,
@@ -530,6 +596,11 @@ impl MarketplaceContract {
         Ok(())
     }
 
+    /// Cancel a listing and return the escrowed bot to its seller.
+    ///
+    /// This is the escape hatch: it is intentionally NOT blocked while the
+    /// marketplace is paused, so sellers can always retrieve escrowed bots.
+    /// Order: existence -> authorization -> state validity -> effects.
     pub fn cancel_listing(
         env: Env,
         seller: Address,
@@ -543,12 +614,12 @@ impl MarketplaceContract {
             .get(&DataKey::Listing(listing_id))
             .ok_or(MarketplaceError::ListingNotFound)?;
 
-        if !listing.active {
-            return Err(MarketplaceError::ListingNotActive);
-        }
-
         if listing.seller != seller {
             return Err(MarketplaceError::Unauthorized);
+        }
+
+        if !listing.active {
+            return Err(MarketplaceError::ListingNotActive);
         }
 
         let config: Config = env
@@ -596,12 +667,71 @@ impl MarketplaceContract {
         env.storage()
             .instance()
             .extend_ttl(LEDGER_THRESHOLD, LEDGER_BUMP);
+        Self::on_listing_removed(&env, &listing);
 
         Self::decrement_user_active_listing_count(&env, &listing.seller);
 
         env.events().publish(
             (symbol_short!("cancel"), seller, listing_id),
             listing.bot_id,
+        );
+        Ok(())
+    }
+
+    /// Change the price of an active listing. Only the seller may call it, and
+    /// the new price must satisfy the same rules as `list_bot`.
+    /// Order: existence -> authorization -> state validity -> effects.
+    pub fn update_price(
+        env: Env,
+        seller: Address,
+        listing_id: u64,
+        new_price: i128,
+    ) -> Result<(), MarketplaceError> {
+        seller.require_auth();
+        Self::require_not_paused(&env)?;
+
+        let mut listing: Listing = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Listing(listing_id))
+            .ok_or(MarketplaceError::ListingNotFound)?;
+
+        if listing.seller != seller {
+            return Err(MarketplaceError::Unauthorized);
+        }
+
+        if !listing.active {
+            return Err(MarketplaceError::ListingNotActive);
+        }
+
+        if new_price <= 0 {
+            return Err(MarketplaceError::InvalidPrice);
+        }
+        let config: Config = env
+            .storage()
+            .instance()
+            .get(&DataKey::Config)
+            .ok_or(MarketplaceError::NotInitialized)?;
+        let min_price = Self::min_price_for_currency(&env, &listing.currency, config.fee_bps);
+        if new_price < min_price {
+            return Err(MarketplaceError::PriceTooLow);
+        }
+
+        let old_price = listing.price;
+        listing.price = new_price;
+        env.storage()
+            .persistent()
+            .set(&DataKey::Listing(listing_id), &listing);
+        env.storage().persistent().extend_ttl(
+            &DataKey::Listing(listing_id),
+            LEDGER_THRESHOLD,
+            LEDGER_BUMP,
+        );
+        Self::on_price_changed(&env, &listing);
+
+        env.events().publish(
+            (Symbol::new(&env, "price_upd"), seller, listing_id),
+            (old_price, new_price),
         );
         Ok(())
     }
@@ -633,6 +763,7 @@ impl MarketplaceContract {
                         .persistent()
                         .set(&DataKey::Listing(listing_id), &listing);
                     Self::remove_active_listing(&env, listing_id);
+                    Self::on_listing_removed(&env, &listing);
                     Self::decrement_user_active_listing_count(&env, &listing.seller);
                     env.events().publish(
                         (symbol_short!("deactive"), bot_id),
@@ -804,16 +935,47 @@ impl MarketplaceContract {
         Ok(())
     }
 
-    pub fn set_admin(env: Env, new_admin: Address) -> Result<(), MarketplaceError> {
-        let mut config: Config = env
+    /// Step one of an admin transfer: the current admin nominates `new_admin`.
+    /// Nothing changes until `new_admin` calls `accept_admin`; proposing again
+    /// replaces the pending nomination.
+    pub fn propose_admin(env: Env, new_admin: Address) -> Result<(), MarketplaceError> {
+        let config: Config = env
             .storage()
             .instance()
             .get(&DataKey::Config)
             .ok_or(MarketplaceError::NotInitialized)?;
         config.admin.require_auth();
+        env.storage()
+            .instance()
+            .set(&DataKey::PendingAdmin, &new_admin);
+        env.storage()
+            .instance()
+            .extend_ttl(LEDGER_THRESHOLD, LEDGER_BUMP);
+        env.events().publish(
+            (Symbol::new(&env, "admin_proposed"),),
+            (config.admin, new_admin),
+        );
+        Ok(())
+    }
+
+    /// Step two of an admin transfer: the nominated address accepts and becomes
+    /// admin. Fails with `NoPendingAdmin` if nobody was proposed.
+    pub fn accept_admin(env: Env) -> Result<(), MarketplaceError> {
+        let mut config: Config = env
+            .storage()
+            .instance()
+            .get(&DataKey::Config)
+            .ok_or(MarketplaceError::NotInitialized)?;
+        let pending: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::PendingAdmin)
+            .ok_or(MarketplaceError::NoPendingAdmin)?;
+        pending.require_auth();
         let old_admin = config.admin.clone();
-        config.admin = new_admin;
+        config.admin = pending;
         env.storage().instance().set(&DataKey::Config, &config);
+        env.storage().instance().remove(&DataKey::PendingAdmin);
         env.storage()
             .instance()
             .extend_ttl(LEDGER_THRESHOLD, LEDGER_BUMP);
@@ -822,6 +984,66 @@ impl MarketplaceContract {
             (old_admin, config.admin.clone()),
         );
         Ok(())
+    }
+
+    /// The address nominated by `propose_admin`, if a transfer is pending.
+    pub fn pending_admin(env: Env) -> Option<Address> {
+        env.storage().instance().get(&DataKey::PendingAdmin)
+    }
+
+    /// Admin-only: block `list_bot`, `buy_bot` and `update_price`.
+    /// `cancel_listing` keeps working so sellers can always retrieve bots.
+    pub fn pause(env: Env) -> Result<(), MarketplaceError> {
+        let config: Config = env
+            .storage()
+            .instance()
+            .get(&DataKey::Config)
+            .ok_or(MarketplaceError::NotInitialized)?;
+        config.admin.require_auth();
+        env.storage().instance().set(&DataKey::Paused, &true);
+        env.storage()
+            .instance()
+            .extend_ttl(LEDGER_THRESHOLD, LEDGER_BUMP);
+        env.events().publish((symbol_short!("paused"),), config.admin);
+        Ok(())
+    }
+
+    /// Admin-only: resume trading after `pause`.
+    pub fn unpause(env: Env) -> Result<(), MarketplaceError> {
+        let config: Config = env
+            .storage()
+            .instance()
+            .get(&DataKey::Config)
+            .ok_or(MarketplaceError::NotInitialized)?;
+        config.admin.require_auth();
+        env.storage().instance().set(&DataKey::Paused, &false);
+        env.storage()
+            .instance()
+            .extend_ttl(LEDGER_THRESHOLD, LEDGER_BUMP);
+        env.events()
+            .publish((Symbol::new(&env, "unpaused"),), config.admin);
+        Ok(())
+    }
+
+    pub fn is_paused(env: Env) -> bool {
+        env.storage()
+            .instance()
+            .get(&DataKey::Paused)
+            .unwrap_or(false)
+    }
+
+    /// Sales statistics for one tier (all zeros before any activity).
+    pub fn tier_stats(env: Env, tier: BotTier) -> TierStats {
+        Self::read_tier_stats(&env, tier)
+    }
+
+    /// Sales statistics for every tier, in tier order (Basic .. Diamond).
+    pub fn market_stats(env: Env) -> Vec<TierStats> {
+        let mut result: Vec<TierStats> = Vec::new(&env);
+        for tier in ALL_TIERS {
+            result.push_back(Self::read_tier_stats(&env, tier));
+        }
+        result
     }
 
     pub fn get_listing_cap(env: Env) -> u32 {
@@ -866,6 +1088,112 @@ impl MarketplaceContract {
             .get(&DataKey::Config)
             .unwrap();
         config.bot_nft
+    }
+
+    fn require_not_paused(env: &Env) -> Result<(), MarketplaceError> {
+        if env
+            .storage()
+            .instance()
+            .get::<_, bool>(&DataKey::Paused)
+            .unwrap_or(false)
+        {
+            return Err(MarketplaceError::ContractPaused);
+        }
+        Ok(())
+    }
+
+    fn read_tier_stats(env: &Env, tier: BotTier) -> TierStats {
+        env.storage()
+            .persistent()
+            .get(&DataKey::TierStats(tier))
+            .unwrap_or(TierStats {
+                tier,
+                volume: 0,
+                sale_count: 0,
+                last_sale_price: 0,
+                floor_price: 0,
+                floor_listing_id: 0,
+            })
+    }
+
+    fn write_tier_stats(env: &Env, stats: &TierStats) {
+        let key = DataKey::TierStats(stats.tier);
+        env.storage().persistent().set(&key, stats);
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, LEDGER_THRESHOLD, LEDGER_BUMP);
+    }
+
+    /// A new active listing can only lower the floor: one comparison.
+    fn on_listing_added(env: &Env, listing: &Listing) {
+        let mut stats = Self::read_tier_stats(env, listing.bot_tier);
+        if stats.floor_price == 0 || listing.price < stats.floor_price {
+            stats.floor_price = listing.price;
+            stats.floor_listing_id = listing.id;
+            Self::write_tier_stats(env, &stats);
+        }
+    }
+
+    /// Called after `listing` has left the active index (sold, cancelled,
+    /// deactivated). The floor is rescanned only if this listing held it.
+    fn on_listing_removed(env: &Env, listing: &Listing) {
+        let mut stats = Self::read_tier_stats(env, listing.bot_tier);
+        if stats.floor_listing_id == listing.id {
+            let (price, id) = Self::scan_floor(env, listing.bot_tier);
+            stats.floor_price = price;
+            stats.floor_listing_id = id;
+            Self::write_tier_stats(env, &stats);
+        }
+    }
+
+    /// Called after an active listing's price changed and was persisted.
+    fn on_price_changed(env: &Env, listing: &Listing) {
+        let mut stats = Self::read_tier_stats(env, listing.bot_tier);
+        if stats.floor_price == 0 || listing.price < stats.floor_price {
+            stats.floor_price = listing.price;
+            stats.floor_listing_id = listing.id;
+            Self::write_tier_stats(env, &stats);
+        } else if stats.floor_listing_id == listing.id {
+            let (price, id) = Self::scan_floor(env, listing.bot_tier);
+            stats.floor_price = price;
+            stats.floor_listing_id = id;
+            Self::write_tier_stats(env, &stats);
+        }
+    }
+
+    fn record_sale(env: &Env, tier: BotTier, price: i128) -> Result<(), MarketplaceError> {
+        let mut stats = Self::read_tier_stats(env, tier);
+        stats.volume = stats
+            .volume
+            .checked_add(price)
+            .ok_or(MarketplaceError::Overflow)?;
+        stats.sale_count += 1;
+        stats.last_sale_price = price;
+        Self::write_tier_stats(env, &stats);
+        Ok(())
+    }
+
+    /// Lowest price and listing id among active listings of `tier`, or
+    /// `(0, 0)` when there are none.
+    fn scan_floor(env: &Env, tier: BotTier) -> (i128, u64) {
+        let active: Vec<u64> = env
+            .storage()
+            .instance()
+            .get(&DataKey::ActiveListings)
+            .unwrap_or_else(|| Vec::new(env));
+        let mut best: (i128, u64) = (0, 0);
+        for id in active.iter() {
+            if let Some(l) = env
+                .storage()
+                .persistent()
+                .get::<_, Listing>(&DataKey::Listing(id))
+            {
+                if l.active && l.bot_tier == tier && (best.0 == 0 || l.price < best.0) {
+                    best = (l.price, l.id);
+                }
+            }
+        }
+        best
     }
 
     fn remove_active_listing(env: &Env, listing_id: u64) {
