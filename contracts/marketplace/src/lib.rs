@@ -156,6 +156,7 @@ pub enum DataKey {
     TierStats(BotTier),
     BotListing(u64),
     Locked,  // #326: Reentrancy guard
+    AllowedCurrencies,  // #325: Currency allowlist
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -231,6 +232,7 @@ pub enum MarketplaceError {
     BotNotFound = 20,
     NotBotOwner = 21,
     Reentrancy = 22,  // #326: Reentrancy guard
+    UnsupportedCurrency = 23,  // #325: Currency allowlist
 }
 
 /// Every bot tier, in order, for per-tier reporting.
@@ -400,6 +402,12 @@ impl MarketplaceContract {
             return Err(MarketplaceError::TooManyListings);
         }
 
+        // #325: Check if currency is allowlisted
+        if !Self::is_currency_allowed(&env, &currency) {
+            Self::clear_lock(&env);
+            return Err(MarketplaceError::UnsupportedCurrency);
+        }
+
         // Enforce per-currency floor: price must be >= min_price(currency).
         // The default guarantees fee >= 1 base unit when fee_bps > 0.
         let min_price = Self::min_price_for_currency(&env, &currency, config.fee_bps);
@@ -549,6 +557,12 @@ impl MarketplaceContract {
                 return Err(MarketplaceError::NotInitialized);
             }
         };
+
+        // #325: Check if the currency is still allowlisted
+        if !Self::is_currency_allowed(&env, &listing.currency) {
+            Self::clear_lock(&env);
+            return Err(MarketplaceError::UnsupportedCurrency);
+        }
 
         // Verify the marketplace still owns the escrowed bot before moving any
         // funds. If the bot is missing or has been reassigned (admin action,
@@ -1240,6 +1254,21 @@ impl MarketplaceContract {
             .unwrap_or(false)
     }
 
+    /// Admin-only: add a currency to the allowlist (#325)
+    pub fn add_allowed_currency(env: Env, currency: Address) -> Result<(), MarketplaceError> {
+        Self::add_currency(&env, currency)
+    }
+
+    /// Admin-only: remove a currency from the allowlist (#325)
+    pub fn remove_allowed_currency(env: Env, currency: Address) -> Result<(), MarketplaceError> {
+        Self::remove_currency(&env, currency)
+    }
+
+    /// Check if a currency is in the allowlist (#325)
+    pub fn is_allowed_currency(env: Env, currency: Address) -> bool {
+        Self::is_currency_allowed(&env, &currency)
+    }
+
     /// Sales statistics for one tier (all zeros before any activity).
     pub fn tier_stats(env: Env, tier: BotTier) -> TierStats {
         Self::read_tier_stats(&env, tier)
@@ -1475,6 +1504,91 @@ impl MarketplaceContract {
 
     fn clear_lock(env: &Env) {
         env.storage().instance().remove(&DataKey::Locked);
+    }
+
+    fn is_currency_allowed(env: &Env, currency: &Address) -> bool {
+        let allowed: Option<Vec<Address>> = env
+            .storage()
+            .instance()
+            .get(&DataKey::AllowedCurrencies);
+        if let Some(currencies) = allowed {
+            for c in currencies.iter() {
+                if c == currency {
+                    return true;
+                }
+            }
+            false
+        } else {
+            false
+        }
+    }
+
+    fn add_currency(env: &Env, currency: Address) -> Result<(), MarketplaceError> {
+        let config: Config = env
+            .storage()
+            .instance()
+            .get(&DataKey::Config)
+            .ok_or(MarketplaceError::NotInitialized)?;
+        config.admin.require_auth();
+
+        let mut allowed: Vec<Address> = env
+            .storage()
+            .instance()
+            .get(&DataKey::AllowedCurrencies)
+            .unwrap_or_else(|| Vec::new(env));
+
+        for c in allowed.iter() {
+            if c == &currency {
+                return Ok(());
+            }
+        }
+
+        allowed.push_back(currency.clone());
+        env.storage()
+            .instance()
+            .set(&DataKey::AllowedCurrencies, &allowed);
+        env.storage()
+            .instance()
+            .extend_ttl(LEDGER_THRESHOLD, LEDGER_BUMP);
+        env.events().publish(
+            (Symbol::new(env, "currency_added"),),
+            currency,
+        );
+        Ok(())
+    }
+
+    fn remove_currency(env: &Env, currency: Address) -> Result<(), MarketplaceError> {
+        let config: Config = env
+            .storage()
+            .instance()
+            .get(&DataKey::Config)
+            .ok_or(MarketplaceError::NotInitialized)?;
+        config.admin.require_auth();
+
+        let allowed: Vec<Address> = env
+            .storage()
+            .instance()
+            .get(&DataKey::AllowedCurrencies)
+            .unwrap_or_else(|| Vec::new(env));
+
+        let mut new_allowed: Vec<Address> = Vec::new(env);
+        for c in allowed.iter() {
+            if c != &currency {
+                new_allowed.push_back(c);
+            }
+        }
+
+        env.storage()
+            .instance()
+            .set(&DataKey::AllowedCurrencies, &new_allowed);
+        env.storage()
+            .instance()
+            .extend_ttl(LEDGER_THRESHOLD, LEDGER_BUMP);
+        env.events().publish(
+            (Symbol::new(env, "currency_removed"),),
+            currency,
+        );
+        Ok(())
     }
 
     fn decrement_user_active_listing_count(env: &Env, seller: &Address) {
