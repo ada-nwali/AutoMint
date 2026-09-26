@@ -154,6 +154,7 @@ pub enum DataKey {
     Paused,
     PendingAdmin,
     TierStats(BotTier),
+    BotListing(u64),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -201,6 +202,7 @@ pub struct Config {
     pub admin: Address,
     pub bot_nft: Address,
     pub fee_bps: u32,
+    pub royalty_bps: u32,
 }
 
 #[contracterror]
@@ -225,6 +227,7 @@ pub enum MarketplaceError {
     InvalidBotNft = 17,
     ContractPaused = 18,
     NoPendingAdmin = 19,
+    AlreadyListed = 20,
 }
 
 /// Every bot tier, in order, for per-tier reporting.
@@ -251,6 +254,7 @@ impl MarketplaceContract {
         admin: Address,
         bot_nft: Address,
         fee_bps: u32,
+        royalty_bps: u32,
     ) -> Result<(), MarketplaceError> {
         if env.storage().instance().has(&DataKey::Initialized) {
             return Err(MarketplaceError::AlreadyInitialized);
@@ -259,10 +263,15 @@ impl MarketplaceContract {
 
         Self::probe_bot_nft(&env, &bot_nft)?;
 
+        if (fee_bps as u64) + (royalty_bps as u64) > 10_000 {
+            return Err(MarketplaceError::InvalidPrice);
+        }
+
         let config = Config {
             admin: admin.clone(),
             bot_nft: bot_nft.clone(),
             fee_bps,
+            royalty_bps,
         };
         env.storage().instance().set(&DataKey::Config, &config);
         env.storage().instance().set(&DataKey::Initialized, &true);
@@ -398,6 +407,16 @@ impl MarketplaceContract {
             .map_err(|_| MarketplaceError::BotTransferFailed)?;
         let bot_tier = bot.tier;
 
+        // Check if bot is already listed (#428).
+        if env
+            .storage()
+            .persistent()
+            .get::<_, u64>(&DataKey::BotListing(bot_id))
+            .is_some()
+        {
+            return Err(MarketplaceError::AlreadyListed);
+        }
+
         // Escrow the bot into the marketplace. The transfer fails (and we
         // surface BotTransferFailed instead of panicking) when the bot does not
         // exist or the seller is not its owner.
@@ -430,6 +449,15 @@ impl MarketplaceContract {
             .set(&DataKey::Listing(listing_id), &listing);
         env.storage().persistent().extend_ttl(
             &DataKey::Listing(listing_id),
+            LEDGER_THRESHOLD,
+            LEDGER_BUMP,
+        );
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::BotListing(bot_id), &listing_id);
+        env.storage().persistent().extend_ttl(
+            &DataKey::BotListing(bot_id),
             LEDGER_THRESHOLD,
             LEDGER_BUMP,
         );
@@ -528,16 +556,25 @@ impl MarketplaceContract {
             return Err(MarketplaceError::ListingStale);
         }
 
-        // 2.5% fee (250 bps) by default, guarded against overflow.
-        let fee = listing
+        let platform_fee = listing
             .price
             .checked_mul(config.fee_bps as i128)
             .ok_or(MarketplaceError::Overflow)?
             .checked_div(10_000)
             .ok_or(MarketplaceError::Overflow)?;
+
+        let royalty = listing
+            .price
+            .checked_mul(config.royalty_bps as i128)
+            .ok_or(MarketplaceError::Overflow)?
+            .checked_div(10_000)
+            .ok_or(MarketplaceError::Overflow)?;
+
         let seller_amount = listing
             .price
-            .checked_sub(fee)
+            .checked_sub(platform_fee)
+            .ok_or(MarketplaceError::Overflow)?
+            .checked_sub(royalty)
             .ok_or(MarketplaceError::Overflow)?;
 
         // Transfer the NFT first. If payment later fails the buyer already
@@ -559,12 +596,21 @@ impl MarketplaceContract {
         {
             return Err(MarketplaceError::PaymentFailed);
         }
-        if fee > 0
+        if platform_fee > 0
             && token_client
-                .try_transfer(&buyer, &config.admin, &fee)
+                .try_transfer(&buyer, &config.admin, &platform_fee)
                 .is_err()
         {
             return Err(MarketplaceError::PaymentFailed);
+        }
+
+        if royalty > 0 && bot.minter != listing.seller {
+            if token_client
+                .try_transfer(&buyer, &bot.minter, &royalty)
+                .is_err()
+            {
+                return Err(MarketplaceError::PaymentFailed);
+            }
         }
 
         listing.active = false;
@@ -576,6 +622,9 @@ impl MarketplaceContract {
             LEDGER_THRESHOLD,
             LEDGER_BUMP,
         );
+        env.storage()
+            .persistent()
+            .remove(&DataKey::BotListing(listing.bot_id));
         Self::remove_active_listing(&env, listing_id);
         Self::record_sale(&env, listing.bot_tier, listing.price)?;
         Self::on_listing_removed(&env, &listing);
@@ -648,6 +697,10 @@ impl MarketplaceContract {
             LEDGER_THRESHOLD,
             LEDGER_BUMP,
         );
+
+        env.storage()
+            .persistent()
+            .remove(&DataKey::BotListing(listing.bot_id));
 
         // Remove from the active listings index.
         let active: Vec<u64> = env
@@ -762,6 +815,9 @@ impl MarketplaceContract {
                     env.storage()
                         .persistent()
                         .set(&DataKey::Listing(listing_id), &listing);
+                    env.storage()
+                        .persistent()
+                        .remove(&DataKey::BotListing(listing.bot_id));
                     Self::remove_active_listing(&env, listing_id);
                     Self::on_listing_removed(&env, &listing);
                     Self::decrement_user_active_listing_count(&env, &listing.seller);
@@ -786,10 +842,19 @@ impl MarketplaceContract {
             .ok_or(MarketplaceError::ListingNotFound)
     }
 
+    /// Return the active listing ID for a bot, if one exists. Returns
+    /// `ListingNotFound` if the bot is not listed or its listing was cancelled/sold.
+    pub fn get_listing_for_bot(env: Env, bot_id: u64) -> Result<u64, MarketplaceError> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::BotListing(bot_id))
+            .ok_or(MarketplaceError::ListingNotFound)
+    }
+
     /// Return up to `limit` active listings, skipping the first `start` entries
-    /// of the active-listings index.
+    /// of the active-listings index, bounding the scan to `limit * 4` candidates.
     ///
-    /// Input validation / edge-case handling (issue #120):
+    /// Input validation / edge-case handling (issue #120, #429):
     /// - `limit == 0`: a request for zero items is trivially satisfied, so we
     ///   return an empty vec immediately rather than treating it as an error.
     /// - `start` beyond the number of active listings: the index iteration
@@ -799,11 +864,15 @@ impl MarketplaceContract {
     ///   `if let Some(l)` guard.
     /// - An id still present in the index but whose listing has `active == false`:
     ///   filtered out by the `if l.active` check.
+    /// - High tombstone density: the scan bounds to `limit * 4` candidates
+    ///   examined to prevent O(n) cost regardless of inactive listing density.
     ///
     /// Every edge case degrades gracefully to an empty/partial result, so there
     /// is no genuine failure condition to signal. The return type stays
     /// `Vec<Listing>` (rather than `Result<..>`) to avoid needless API churn for
-    /// callers.
+    /// callers. Pagination: if fewer than `limit` results are returned and the
+    /// result size < `limit`, the caller has reached the end. Otherwise,
+    /// increment `start` by `limit` to continue pagination.
     pub fn get_active_listings(env: Env, start: u64, limit: u32) -> Vec<Listing> {
         let mut result: Vec<Listing> = Vec::new(&env);
         if limit == 0 {
@@ -817,10 +886,16 @@ impl MarketplaceContract {
         let marketplace = env.current_contract_address();
         let config: Option<Config> = env.storage().instance().get(&DataKey::Config);
         let mut count: u32 = 0;
+        let max_candidates = limit.saturating_mul(4);
+        let mut candidates_examined: u32 = 0;
         for (i, id) in active_ids.iter().enumerate() {
             if (i as u64) < start {
                 continue;
             }
+            if candidates_examined >= max_candidates {
+                break;
+            }
+            candidates_examined += 1;
             if count >= limit {
                 break;
             }
