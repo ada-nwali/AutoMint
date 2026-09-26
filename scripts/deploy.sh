@@ -396,8 +396,14 @@ deploy_contract registry
 init_contract registry initialize --admin "$ADMIN_ADDRESS"
 verify_contract registry
 
+deploy_contract token
+init_contract token initialize --admin "$ADMIN_ADDRESS" \
+  --decimal 7 --name "AutoMint Token" --symbol "AMT"
+verify_contract token
+
 deploy_contract bot_nft
-init_contract bot_nft initialize --admin "$ADMIN_ADDRESS" --registry "$(resolve_id registry)"
+init_contract bot_nft initialize --admin "$ADMIN_ADDRESS" --registry "$(resolve_id registry)" \
+  --payment-token "$(resolve_id token)"
 verify_contract bot_nft
 
 deploy_contract accrual
@@ -409,11 +415,6 @@ deploy_contract marketplace
 init_contract marketplace initialize --admin "$ADMIN_ADDRESS" \
   --bot-nft "$(resolve_id bot_nft)" --fee-bps 250
 verify_contract marketplace
-
-deploy_contract token
-init_contract token initialize --admin "$ADMIN_ADDRESS" \
-  --decimal 7 --name "AutoMint Token" --symbol "AMT"
-verify_contract token
 
 # 3b. Wire the Accrual contract as the Token's admin so claims can mint AMT.
 wire_token_admin

@@ -3,7 +3,7 @@
 #![no_std]
 use soroban_sdk::{
     contract, contractclient, contracterror, contractimpl, contracttype, symbol_short, Address, Env,
-    Vec,
+    Vec, IntoVal,
 };
 
 /// The one bot_nft entry point accrual calls. Declared locally rather than
@@ -151,12 +151,33 @@ impl AccrualContract {
             .set(&DataKey::Config, &Config { points_per_amt });
 
         env.storage().instance().set(&DataKey::Initialized, &true);
+        let mut args = Vec::new(&env);
+        args.push_back(env.current_contract_address().into_val(&env));
+        let _ = env.try_invoke_contract::<(), soroban_sdk::Error>(
+            &bot_nft, &soroban_sdk::Symbol::new(&env, "set_accrual"), args);
 
         env.storage()
             .instance()
             .extend_ttl(LEDGER_THRESHOLD, LEDGER_BUMP);
 
         Ok(())
+    }
+
+    pub fn sync_rate(env: Env, user: Address) -> Result<u64, AccrualError> {
+        let Some(mut accrual) = env.storage().persistent().get::<_, UserAccrual>(&DataKey::UserAccrual(user.clone())) else {
+            return Ok(0);
+        };
+        let now = env.ledger().timestamp();
+        let elapsed = now.saturating_sub(accrual.last_claim_ts);
+        let settled = elapsed.saturating_mul(accrual.rate) / 3600;
+        accrual.carry_points = accrual.carry_points.saturating_add(settled);
+        accrual.lifetime_points = accrual.lifetime_points.saturating_add(settled);
+        accrual.last_claim_ts = now;
+        let bot_nft: Address = env.storage().instance().get(&DataKey::BotNft).ok_or(AccrualError::NotInitialized)?;
+        accrual.rate = BotNftClient::new(&env, &bot_nft).get_user_total_rate(&user);
+        env.storage().persistent().set(&DataKey::UserAccrual(user.clone()), &accrual);
+        env.storage().persistent().extend_ttl(&DataKey::UserAccrual(user), LEDGER_THRESHOLD, LEDGER_BUMP);
+        Ok(settled)
     }
 
     /// Starts accruing for `user` at the combined rate of the bots they own,

@@ -107,10 +107,6 @@ impl DeploymentBuilder {
         let registry = RegistryContractClient::new(&env, &registry_id);
         registry.initialize(&admin);
 
-        let bot_nft_id = env.register_contract(None, BotNFTContract);
-        let bot_nft = BotNFTContractClient::new(&env, &bot_nft_id);
-        bot_nft.initialize(&admin, &registry_id);
-
         let token_id = env.register_contract(None, AMTToken);
         let token = AMTTokenClient::new(&env, &token_id);
         token.initialize(
@@ -119,6 +115,10 @@ impl DeploymentBuilder {
             &String::from_str(&env, self.token_name),
             &String::from_str(&env, self.token_symbol),
         );
+
+        let bot_nft_id = env.register_contract(None, BotNFTContract);
+        let bot_nft = BotNFTContractClient::new(&env, &bot_nft_id);
+        bot_nft.initialize(&admin, &registry_id, &token_id);
 
         let accrual_id = env.register_contract(None, AccrualContract);
         let accrual = AccrualContractClient::new(&env, &accrual_id);
@@ -130,7 +130,7 @@ impl DeploymentBuilder {
 
         let marketplace_id = env.register_contract(None, MarketplaceContract);
         let marketplace = MarketplaceContractClient::new(&env, &marketplace_id);
-        marketplace.initialize(&admin, &bot_nft_id, &self.marketplace_fee_bps);
+        marketplace.initialize(&admin, &bot_nft_id, &self.marketplace_fee_bps, &0u32);
 
         Deployment {
             env,
@@ -165,7 +165,7 @@ pub fn deploy_bot_nft_with_registry(
 ) -> (Address, BotNFTContractClient<'static>) {
     let bot_nft_id = env.register_contract(None, BotNFTContract);
     let bot_nft = BotNFTContractClient::new(env, &bot_nft_id);
-    bot_nft.initialize(admin, registry);
+    bot_nft.initialize(admin, registry, &Address::generate(env));
     (bot_nft_id, bot_nft)
 }
 

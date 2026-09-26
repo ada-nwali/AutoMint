@@ -119,6 +119,8 @@ pub enum DataKey {
     TierSupply(BotTier),
     TierRate(BotTier),
     Marketplace,
+    Accrual,
+    PaymentToken,
     TierIndex(BotTier),
 }
 
@@ -162,7 +164,7 @@ pub struct BotNFTContract;
 
 #[contractimpl]
 impl BotNFTContract {
-    pub fn initialize(env: Env, admin: Address, registry: Address) -> Result<(), BotNFTError> {
+    pub fn initialize(env: Env, admin: Address, registry: Address, payment_token: Address) -> Result<(), BotNFTError> {
         if env.storage().instance().has(&DataKey::Initialized) {
             return Err(BotNFTError::AlreadyInitialized);
         }
@@ -172,6 +174,7 @@ impl BotNFTContract {
         env.storage().instance().set(&DataKey::NextId, &1u64);
         env.storage().instance().set(&DataKey::Initialized, &true);
         env.storage().instance().set(&DataKey::Registry, &registry);
+        env.storage().instance().set(&DataKey::PaymentToken, &payment_token);
 
         env.storage().instance().set(&DataKey::TierRate(BotTier::Basic), &1u64);
         env.storage().instance().set(&DataKey::TierRate(BotTier::Bronze), &5u64);
@@ -183,6 +186,17 @@ impl BotNFTContract {
             .instance()
             .extend_ttl(LEDGER_THRESHOLD, LEDGER_BUMP);
         Ok(())
+    }
+
+    pub fn set_accrual(env: Env, accrual: Address) -> Result<(), BotNFTError> {
+        let admin: Address = env.storage().instance().get(&DataKey::Admin).ok_or(BotNFTError::NotInitialized)?;
+        admin.require_auth();
+        env.storage().instance().set(&DataKey::Accrual, &accrual);
+        Ok(())
+    }
+
+    pub fn payment_token(env: Env) -> Result<Address, BotNFTError> {
+        env.storage().instance().get(&DataKey::PaymentToken).ok_or(BotNFTError::NotInitialized)
     }
 
     pub fn set_marketplace(env: Env, marketplace: Address) -> Result<(), BotNFTError> {
@@ -267,7 +281,6 @@ impl BotNFTContract {
         env: Env,
         owner: Address,
         tier: Tier,
-        token: Address,
     ) -> Result<u64, BotNFTError> {
         if !env.storage().instance().has(&DataKey::Initialized) {
             return Err(BotNFTError::NotInitialized);
@@ -277,6 +290,7 @@ impl BotNFTContract {
         // Charge the purchase price (transfer fails on insufficient balance).
         let price = tier.price();
         if price > 0 {
+            let token = Self::payment_token(env.clone())?;
             let token_client = token::Client::new(&env, &token);
             token_client.transfer(&owner, &env.current_contract_address(), &price);
         }
@@ -379,7 +393,17 @@ impl BotNFTContract {
             symbol_short!("mint")
         };
         env.events().publish((topic, owner.clone()), (bot_id, tier));
+        Self::sync_rate(env, owner);
         Ok(bot_id)
+    }
+
+    fn sync_rate(env: &Env, user: &Address) {
+        if let Some(accrual) = env.storage().instance().get::<_, Address>(&DataKey::Accrual) {
+            let mut args = Vec::new(env);
+            args.push_back(user.clone().into_val(env));
+            let _ = env.try_invoke_contract::<soroban_sdk::Val, soroban_sdk::Error>(
+                &accrual, &soroban_sdk::Symbol::new(env, "sync_rate"), args);
+        }
     }
 
     pub fn transfer(env: Env, bot_id: u64, from: Address, to: Address) -> Result<(), BotNFTError> {
@@ -412,6 +436,8 @@ impl BotNFTContract {
             .extend_ttl(LEDGER_THRESHOLD, LEDGER_BUMP);
         Self::remove_bot_from_user(&env, &from, bot_id);
         Self::add_bot_to_user(&env, &to, bot_id);
+        Self::sync_rate(&env, &from);
+        Self::sync_rate(&env, &to);
 
         if let Some(mkt_addr) = env.storage().instance().get::<_, Address>(&DataKey::Marketplace) {
             if to != mkt_addr {

@@ -259,6 +259,30 @@ impl AMTToken {
         Ok(())
     }
 
+    pub fn burn_from(
+        env: Env,
+        spender: Address,
+        from: Address,
+        amount: i128,
+    ) -> Result<(), TokenError> {
+        PausableStore::require_not_paused(&env).map_err(|_| TokenError::Paused)?;
+        spender.require_auth();
+        if amount < 0 { return Err(TokenError::NegativeAmount); }
+        if amount == 0 { return Ok(()); }
+
+        let balance = Self::balance(env.clone(), from.clone());
+        if balance < amount { return Err(TokenError::InsufficientBalance); }
+        Self::spend_allowance(&env, &from, &spender, amount)?;
+        env.storage().persistent().set(&DataKey::Balance(from.clone()), &(balance - amount));
+        let supply = Self::total_supply(env.clone());
+        let new_supply = supply.checked_sub(amount).ok_or(TokenError::Overflow)?;
+        env.storage().persistent().set(&DataKey::TotalSupply, &new_supply);
+        env.storage().persistent().extend_ttl(&DataKey::Balance(from.clone()), LEDGER_THRESHOLD, LEDGER_BUMP);
+        env.storage().instance().extend_ttl(LEDGER_THRESHOLD, LEDGER_BUMP);
+        env.events().publish((symbol_short!("burn"), spender, from), amount);
+        Ok(())
+    }
+
     pub fn mint(env: Env, to: Address, amount: i128) -> Result<(), TokenError> {
         PausableStore::require_not_paused(&env).map_err(|_| TokenError::Paused)?;  // #336
         Self::require_admin(&env)?;
@@ -374,7 +398,7 @@ impl AMTToken {
             .instance()
             .extend_ttl(LEDGER_THRESHOLD, LEDGER_BUMP);
         env.events()
-            .publish((symbol_short!("set_max_supply"),), new_cap.unwrap_or(-1));
+            .publish((symbol_short!("maxsup"),), new_cap.unwrap_or(-1));
         Ok(())
     }
 
