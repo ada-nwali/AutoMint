@@ -14,6 +14,7 @@ pub enum DataKey {
     State,
     Admin,
     TotalSupply,  // #338
+    MaxSupply,    // #339
 }
 
 #[derive(Clone)]
@@ -50,6 +51,8 @@ pub enum TokenError {
     AllowanceExpired = 7,
     Overflow = 8,
     Paused = 1000,  // #336
+    SupplyCapExceeded = 9,  // #339
+    InvalidDecimals = 10,   // referenced in tests
 }
 
 // TTL constants moved to automint-common (#337)
@@ -274,6 +277,14 @@ impl AMTToken {
         // #338: Update total supply
         let current_supply = Self::total_supply(env.clone());
         let new_supply = current_supply.checked_add(amount).ok_or(TokenError::Overflow)?;
+
+        // #339: Check supply cap
+        if let Some(cap) = Self::max_supply(env.clone()) {
+            if new_supply > cap {
+                return Err(TokenError::SupplyCapExceeded);
+            }
+        }
+
         env.storage().persistent().set(&DataKey::TotalSupply, &new_supply);
         env.storage()
             .persistent()
@@ -332,6 +343,39 @@ impl AMTToken {
             .persistent()
             .get(&DataKey::TotalSupply)
             .unwrap_or(0)
+    }
+
+    /// Returns the max supply cap, if set (#339)
+    pub fn max_supply(env: Env) -> Option<i128> {
+        env.storage().persistent().get(&DataKey::MaxSupply)
+    }
+
+    /// Admin-only: set the maximum supply cap. Fails if cap is below current supply (#339)
+    pub fn set_max_supply(env: Env, new_cap: Option<i128>) -> Result<(), TokenError> {
+        Self::require_admin(&env)?;
+
+        if let Some(cap) = new_cap {
+            if cap < 0 {
+                return Err(TokenError::NegativeAmount);
+            }
+            let current_supply = Self::total_supply(env.clone());
+            if cap < current_supply {
+                return Err(TokenError::SupplyCapExceeded);
+            }
+        }
+
+        if let Some(cap) = new_cap {
+            env.storage().persistent().set(&DataKey::MaxSupply, &cap);
+        } else {
+            env.storage().persistent().remove(&DataKey::MaxSupply);
+        }
+
+        env.storage()
+            .instance()
+            .extend_ttl(LEDGER_THRESHOLD, LEDGER_BUMP);
+        env.events()
+            .publish((symbol_short!("set_max_supply"),), new_cap.unwrap_or(-1));
+        Ok(())
     }
 
     /// Checks if the contract is paused (#336)
