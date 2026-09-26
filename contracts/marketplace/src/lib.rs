@@ -1569,7 +1569,7 @@ impl MarketplaceContract {
             .get(&DataKey::AllowedCurrencies);
         if let Some(currencies) = allowed {
             for c in currencies.iter() {
-                if c == currency {
+                if c == *currency {
                     return true;
                 }
             }
@@ -1594,7 +1594,7 @@ impl MarketplaceContract {
             .unwrap_or_else(|| Vec::new(env));
 
         for c in allowed.iter() {
-            if c == &currency {
+            if c == currency {
                 return Ok(());
             }
         }
@@ -1629,7 +1629,7 @@ impl MarketplaceContract {
 
         let mut new_allowed: Vec<Address> = Vec::new(env);
         for c in allowed.iter() {
-            if c != &currency {
+            if c != currency {
                 new_allowed.push_back(c);
             }
         }
