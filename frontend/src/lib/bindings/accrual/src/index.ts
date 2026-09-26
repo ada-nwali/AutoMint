@@ -55,13 +55,22 @@ export const AccrualError = {
   2: {message:"AlreadyStarted"},
   3: {message:"NotStarted"},
   4: {message:"Unauthorized"},
-  5: {message:"NotInitialized"}
+  5: {message:"NotInitialized"},
+  6: {message:"RegistryCallFailed"},
+  7: {message:"TokenMintFailed"},
+  8: {message:"InvalidConfig"},
+  9: {message:"NoBots"},
+  10: {message:"TooManyUsers"},
+  11: {message:"NotRegistered"}
 }
 
 
 export interface AccrualState {
   last_claim_ts: u64;
-  total_claimed_points: u64;
+  carry_points: u64;
+  lifetime_points: u64;
+  rate: u64;
+  started_at: u64;
 }
 
 export type DataKey = {tag: "Allowance", values: readonly [AllowanceKey]} | {tag: "Balance", values: readonly [string]} | {tag: "State", values: void} | {tag: "Admin", values: void};
@@ -137,12 +146,12 @@ export interface Client {
   /**
    * Construct and simulate a initialize transaction. Returns an `AssembledTransaction` object which will have a `result` field containing the result of the simulation. If this transaction changes contract state, you will need to call `signAndSend()` on the returned object.
    */
-  initialize: ({admin, points_per_amt}: {admin: string, points_per_amt: u64}, options?: MethodOptions) => Promise<AssembledTransaction<Result<void>>>
+  initialize: ({admin, bot_nft, registry, points_per_amt}: {admin: string, bot_nft: string, registry: string, points_per_amt: u64}, options?: MethodOptions) => Promise<AssembledTransaction<Result<void>>>
 
   /**
    * Construct and simulate a start_accrual transaction. Returns an `AssembledTransaction` object which will have a `result` field containing the result of the simulation. If this transaction changes contract state, you will need to call `signAndSend()` on the returned object.
    */
-  start_accrual: ({user, rate}: {user: string, rate: u64}, options?: MethodOptions) => Promise<AssembledTransaction<Result<void>>>
+  start_accrual: ({user}: {user: string}, options?: MethodOptions) => Promise<AssembledTransaction<Result<void>>>
 
   /**
    * Construct and simulate a pending_points transaction. Returns an `AssembledTransaction` object which will have a `result` field containing the result of the simulation. If this transaction changes contract state, you will need to call `signAndSend()` on the returned object.

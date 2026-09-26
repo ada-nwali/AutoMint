@@ -7,12 +7,20 @@ The Accrual contract tracks each user's point-accrual clock and converts pending
 ### initialize
 
 ```rust
-pub fn initialize(env: Env, admin: Address, points_per_amt: u64) -> Result<(), AccrualError>
+pub fn initialize(
+    env: Env,
+    admin: Address,
+    bot_nft: Address,
+    registry: Address,
+    points_per_amt: u64,
+) -> Result<(), AccrualError>
 ```
 
-Initialize the contract with an admin address and the points-to-AMT conversion rate. Requires authorization from `admin`.
+Initialize the contract with an admin address, the bot_nft and registry addresses, and the points-to-AMT conversion rate. Requires authorization from `admin`. The registry address is stored so `start_accrual` can verify registration up front (#415).
 
 - `admin`: The contract administrator address.
+- `bot_nft`: The bot NFT contract used to derive each user's accrual rate.
+- `registry`: The registry contract used to verify `is_registered(user)`.
 - `points_per_amt`: Number of points required to mint 1 AMT unit. Must be non-zero.
 
 Errors:
@@ -22,7 +30,7 @@ Errors:
 Example:
 
 ```rust
-accrual_client.initialize(&admin, &100_u64);
+accrual_client.initialize(&admin, &bot_nft_id, &registry_id, &100_u64);
 ```
 
 ---
@@ -30,20 +38,20 @@ accrual_client.initialize(&admin, &100_u64);
 ### start_accrual
 
 ```rust
-pub fn start_accrual(env: Env, user: Address, rate: u64) -> Result<(), AccrualError>
+pub fn start_accrual(env: Env, user: Address) -> Result<(), AccrualError>
 ```
 
-Start the accrual clock for `user` at `rate` points per hour. Requires authorization from `user`. Can only be called once per user.
-
-- `rate`: Points accrued per hour, typically `get_user_total_rate` from the Bot NFT contract.
+Start the accrual clock for `user` at the combined rate of the bots they own, read from the bot_nft contract. Requires authorization from `user`. Can only be called once per user.
 
 Errors:
 - `AlreadyStarted`: `user` already has an accrual record.
+- `NotRegistered`: `user` is not registered in the registry contract (#415).
+- `NoBots`: `user` owns no bots, so the derived rate is zero.
 
 Example:
 
 ```rust
-accrual_client.start_accrual(&user, &rate);
+accrual_client.start_accrual(&user);
 ```
 
 ---
@@ -73,7 +81,7 @@ let pending = accrual_client.pending_points(&user);
 pub fn get_accrual_state(env: Env, user: Address) -> Option<AccrualState>
 ```
 
-Return `Some(AccrualState { last_claim_ts, total_claimed_points })` for `user`, or `None` if accrual has not started.
+Return `Some(AccrualState { last_claim_ts, carry_points, lifetime_points, rate, started_at })` for `user`, or `None` if accrual has not started. The state carries everything the dashboard needs in one call, including the rate used for client-side interpolation (#418).
 
 Example:
 

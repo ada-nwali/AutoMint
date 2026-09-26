@@ -80,7 +80,13 @@ export const MarketplaceError = {
   12: {message:"Overflow"},
   13: {message:"PriceTooLow"},
   14: {message:"ListingStale"},
-  15: {message:"SelfPurchase"}
+  15: {message:"SelfPurchase"},
+  16: {message:"TooManyListings"},
+  17: {message:"InvalidBotNft"},
+  18: {message:"ContractPaused"},
+  19: {message:"NoPendingAdmin"},
+  20: {message:"BotNotFound"},
+  21: {message:"NotBotOwner"}
 }
 
 export enum Tier {

@@ -260,12 +260,16 @@ describe("getAccrualState", () => {
       last_claim_ts: 1_700_000_000n,
       carry_points: 42n,
       lifetime_points: 250n,
+      rate: 5n,
+      started_at: 1_699_000_000n,
     });
     const state = await getAccrualState("GUSER");
     expect(state).toEqual({
       last_claim_ts: 1_700_000_000n,
       carry_points: 42n,
       lifetime_points: 250n,
+      rate: 5n,
+      started_at: 1_699_000_000n,
     });
   });
 

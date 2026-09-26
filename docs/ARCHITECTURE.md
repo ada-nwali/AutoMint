@@ -300,7 +300,7 @@ flowchart TD
     subgraph Contract Initialization Order
         Step4 --> I1["Registry.initialize(admin)"]
         I1 --> I2["BotNFT.initialize(admin, registry_id)"]
-        I2 --> I3["Accrual.initialize(admin, points_per_amt=100)"]
+        I2 --> I3["Accrual.initialize(admin, bot_nft_id, registry_id, points_per_amt=100)"]
         I3 --> I4["Marketplace.initialize(admin, bot_nft_id, fee_bps=250)"]
         I4 --> I5["Token.initialize(admin, decimals=7, name, symbol)"]
     end
@@ -321,7 +321,7 @@ flowchart TD
 4. **Initialize Contracts**:
    - `stellar contract invoke --id $REGISTRY_ID -- initialize --admin $ADMIN_ADDRESS`
    - `stellar contract invoke --id $BOT_NFT_ID -- initialize --admin $ADMIN_ADDRESS --registry $REGISTRY_ID`
-   - `stellar contract invoke --id $ACCRUAL_ID -- initialize --admin $ADMIN_ADDRESS --points_per_amt 100`
+    - `stellar contract invoke --id $ACCRUAL_ID -- initialize --admin $ADMIN_ADDRESS --bot-nft $BOT_NFT_ID --registry $REGISTRY_ID --points-per-amt 100`
    - `stellar contract invoke --id $MARKETPLACE_ID -- initialize --admin $ADMIN_ADDRESS --bot-nft $BOT_NFT_ID --fee-bps 250`
    - `stellar contract invoke --id $TOKEN_ID -- initialize --admin $ADMIN_ADDRESS --decimal 7 --name "AutoMint Token" --symbol "AMT"`
 5. **Export Environment Variables**:

@@ -81,6 +81,10 @@ export interface AccrualState {
   last_claim_ts: bigint;
   carry_points: bigint;
   lifetime_points: bigint;
+  /** Combined accrual rate in points per hour, read from the user's bots. */
+  rate: bigint;
+  /** Ledger timestamp when accrual started for the user. */
+  started_at: bigint;
 }
 
 /** Marketplace sales statistics for one bot tier (#432). Amounts are base units. */

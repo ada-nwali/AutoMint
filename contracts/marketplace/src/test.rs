@@ -109,12 +109,61 @@ fn test_list_bot_negative_price_fails() {
 }
 
 #[test]
-fn test_list_nonexistent_bot_fails() {
+fn test_list_nonexistent_bot_fails_with_bot_not_found() {
     let h = setup();
     let seller = Address::generate(&h.env);
     assert_eq!(
         h.mkt
             .try_list_bot(&seller, &999_u64, &10_0000000_i128, &h.token.address),
+        Err(Ok(MarketplaceError::BotNotFound))
+    );
+}
+
+#[test]
+fn test_list_bot_not_owned_by_seller_fails_with_not_bot_owner() {
+    let h = setup();
+    let owner = Address::generate(&h.env);
+    let stranger = Address::generate(&h.env);
+    let bot_id = h.bot.mint_basic(&owner);
+    // The bot exists but `stranger` does not own it: NotBotOwner, not
+    // BotNotFound and not BotTransferFailed (#427).
+    assert_eq!(
+        h.mkt
+            .try_list_bot(&stranger, &bot_id, &10_0000000_i128, &h.token.address),
+        Err(Ok(MarketplaceError::NotBotOwner))
+    );
+    // The failed listing escrows nothing.
+    assert_eq!(h.bot.get_bot(&bot_id).owner, owner);
+}
+
+#[test]
+fn test_list_bot_genuine_transfer_failure_returns_bot_transfer_failed() {
+    use soroban_sdk::testutils::{MockAuth, MockAuthInvoke};
+    use soroban_sdk::IntoVal;
+    let h = setup();
+    let seller = Address::generate(&h.env);
+    let bot_id = h.bot.mint_basic(&seller);
+    // Authorize `list_bot` itself but not the nested escrow transfer: the
+    // ownership check passes, the transfer leg fails, and list_bot surfaces
+    // BotTransferFailed for that genuine transfer failure (#427).
+    h.env.mock_auths(&[MockAuth {
+        address: &seller,
+        invoke: &MockAuthInvoke {
+            contract: &h.mkt.address,
+            fn_name: "list_bot",
+            args: (
+                seller.clone(),
+                bot_id,
+                10_0000000_i128,
+                h.token.address.clone(),
+            )
+                .into_val(&h.env),
+            sub_invokes: &[],
+        },
+    }]);
+    assert_eq!(
+        h.mkt
+            .try_list_bot(&seller, &bot_id, &10_0000000_i128, &h.token.address),
         Err(Ok(MarketplaceError::BotTransferFailed))
     );
 }
@@ -126,11 +175,11 @@ fn test_list_bot_not_owned_fails() {
     let stranger = Address::generate(&h.env);
     let bot_id = h.bot.mint_basic(&seller);
 
-    // `stranger` does not own the bot, so the escrow transfer must fail.
+    // `stranger` does not own the bot: NotBotOwner (#427).
     assert_eq!(
         h.mkt
             .try_list_bot(&stranger, &bot_id, &10_0000000_i128, &h.token.address),
-        Err(Ok(MarketplaceError::BotTransferFailed))
+        Err(Ok(MarketplaceError::NotBotOwner))
     );
     // Ownership is unchanged.
     assert_eq!(h.bot.get_bot(&bot_id).owner, seller);
@@ -428,7 +477,7 @@ fn test_bot_nft_marketplace_integration_escrowed_bot_cannot_be_listed_again() {
     let result = h
         .mkt
         .try_list_bot(&seller, &bot_id, &100_0000000_i128, &h.token.address);
-    assert_eq!(result, Err(Ok(MarketplaceError::BotTransferFailed)));
+    assert_eq!(result, Err(Ok(MarketplaceError::NotBotOwner)));
 }
 
 // ── Issue #232: Cross-contract integration test: marketplace ↔ token ↔ registry ──
@@ -1177,18 +1226,40 @@ fn test_error_variant_price_too_low() {
 
 #[test]
 fn test_error_variant_bot_transfer_failed() {
+    use soroban_sdk::testutils::{MockAuth, MockAuthInvoke};
+    use soroban_sdk::IntoVal;
     let h = setup();
     let seller = Address::generate(&h.env);
+    // A missing bot is BotNotFound, not a transfer failure (#427).
     assert_eq!(
         h.mkt
             .try_list_bot(&seller, &9999_u64, &100_i128, &h.token.address),
-        Err(Ok(MarketplaceError::BotTransferFailed))
+        Err(Ok(MarketplaceError::BotNotFound))
     );
+    // Someone else's bot is NotBotOwner, not a transfer failure (#427).
     let owner = Address::generate(&h.env);
     let bot = h.bot.mint_basic(&owner);
     assert_eq!(
         h.mkt
             .try_list_bot(&seller, &bot, &100_i128, &h.token.address),
+        Err(Ok(MarketplaceError::NotBotOwner))
+    );
+    // A genuine escrow-transfer failure still surfaces BotTransferFailed:
+    // authorize list_bot but not the nested transfer.
+    let own_bot = h.bot.mint_basic(&seller);
+    h.env.mock_auths(&[MockAuth {
+        address: &seller,
+        invoke: &MockAuthInvoke {
+            contract: &h.mkt.address,
+            fn_name: "list_bot",
+            args: (seller.clone(), own_bot, 100_i128, h.token.address.clone())
+                .into_val(&h.env),
+            sub_invokes: &[],
+        },
+    }]);
+    assert_eq!(
+        h.mkt
+            .try_list_bot(&seller, &own_bot, &100_i128, &h.token.address),
         Err(Ok(MarketplaceError::BotTransferFailed))
     );
 }

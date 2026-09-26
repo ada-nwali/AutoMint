@@ -21,6 +21,8 @@ pub struct AccrualState {
     pub last_claim_ts: u64,
     pub carry_points: u64,
     pub lifetime_points: u64,
+    pub rate: u64,
+    pub started_at: u64,
 }
 
 #[derive(Clone)]
@@ -30,6 +32,7 @@ pub enum DataKey {
     Admin,
     Initialized,
     BotNft,
+    Registry,
     UserAccrual(Address),
 }
 
@@ -46,11 +49,7 @@ fn read_accrual_state(env: &Env, user: &Address) -> Option<AccrualState> {
     env.storage()
         .persistent()
         .get::<_, UserAccrual>(&DataKey::UserAccrual(user.clone()))
-        .map(|a| AccrualState {
-            last_claim_ts: a.last_claim_ts,
-            carry_points: a.carry_points,
-            lifetime_points: a.lifetime_points,
-        })
+        .map(AccrualState::from)
 }
 
 #[derive(Clone)]
@@ -62,6 +61,18 @@ pub struct UserAccrual {
     pub carry_points: u64,
     pub lifetime_points: u64,
     pub started_at: u64,
+}
+
+impl From<UserAccrual> for AccrualState {
+    fn from(a: UserAccrual) -> Self {
+        AccrualState {
+            last_claim_ts: a.last_claim_ts,
+            carry_points: a.carry_points,
+            lifetime_points: a.lifetime_points,
+            rate: a.rate,
+            started_at: a.started_at,
+        }
+    }
 }
 
 #[contracterror]
@@ -77,6 +88,7 @@ pub enum AccrualError {
     InvalidConfig = 8,
     NoBots = 9,
     TooManyUsers = 10,
+    NotRegistered = 11,
 }
 
 fn get_reg_err_code(
@@ -117,6 +129,7 @@ impl AccrualContract {
         env: Env,
         admin: Address,
         bot_nft: Address,
+        registry: Address,
         points_per_amt: u64,
     ) -> Result<(), AccrualError> {
         if env.storage().instance().has(&DataKey::Initialized) {
@@ -131,6 +144,7 @@ impl AccrualContract {
 
         env.storage().instance().set(&DataKey::Admin, &admin);
         env.storage().instance().set(&DataKey::BotNft, &bot_nft);
+        env.storage().instance().set(&DataKey::Registry, &registry);
 
         env.storage()
             .instance()
@@ -147,6 +161,10 @@ impl AccrualContract {
 
     /// Starts accruing for `user` at the combined rate of the bots they own,
     /// read from the bot_nft contract — never from the caller (#319).
+    ///
+    /// The user must already be registered (#415): an unregistered address
+    /// would otherwise accrue time it can never claim, failing later inside
+    /// `registry.add_points` with no actionable error.
     pub fn start_accrual(env: Env, user: Address) -> Result<(), AccrualError> {
         user.require_auth();
         if env
@@ -155,6 +173,15 @@ impl AccrualContract {
             .has(&DataKey::UserAccrual(user.clone()))
         {
             return Err(AccrualError::AlreadyStarted);
+        }
+        let registry: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Registry)
+            .ok_or(AccrualError::NotInitialized)?;
+        let reg_client = automint_registry::RegistryContractClient::new(&env, &registry);
+        if !reg_client.is_registered(&user) {
+            return Err(AccrualError::NotRegistered);
         }
         let bot_nft: Address = env
             .storage()
@@ -379,8 +406,23 @@ mod test {
         )
     }
 
-    /// Mints a free Basic bot (rate 1) for `user` and starts their accrual.
+    static NEXT_AUTO_NAME: std::sync::atomic::AtomicU64 =
+        std::sync::atomic::AtomicU64::new(0);
+
+    /// Registers `user` (if not already), mints a free Basic bot (rate 1)
+    /// for them, and starts their accrual.
+    ///
+    /// `start_accrual` requires registration (#415), so the helper registers
+    /// first with a unique auto-username; an explicit prior registration by
+    /// the caller is kept (`AlreadyRegistered` is ignored).
     fn start_basic(env: &Env, client: &AccrualContractClient, user: &Address) {
+        let registry_id: Address = env.as_contract(&client.address, || {
+            env.storage().instance().get(&DataKey::Registry).unwrap()
+        });
+        let reg_client = automint_registry::RegistryContractClient::new(env, &registry_id);
+        let n = NEXT_AUTO_NAME.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let auto_name = std::format!("autouser{n}");
+        let _ = reg_client.try_register(user, &soroban_sdk::String::from_str(env, &auto_name));
         let bot_nft_id: Address = env.as_contract(&client.address, || {
             env.storage().instance().get(&DataKey::BotNft).unwrap()
         });
@@ -398,7 +440,12 @@ mod test {
     #[test]
     fn test_double_initialize_fails() {
         let (_env, _admin, _registry, _token, client) = setup();
-        let result = client.try_initialize(&_admin, &Address::generate(&_env), &100_u64);
+        let result = client.try_initialize(
+            &_admin,
+            &Address::generate(&_env),
+            &_registry,
+            &100_u64,
+        );
         assert_eq!(result, Err(Ok(AccrualError::AlreadyInitialized)));
     }
 
@@ -409,7 +456,12 @@ mod test {
         let id = env.register_contract(None, AccrualContract);
         let client = AccrualContractClient::new(&env, &id);
         let admin = Address::generate(&env);
-        let result = client.try_initialize(&admin, &Address::generate(&env), &0_u64);
+        let result = client.try_initialize(
+            &admin,
+            &Address::generate(&env),
+            &Address::generate(&env),
+            &0_u64,
+        );
         assert_eq!(result, Err(Ok(AccrualError::InvalidConfig)));
     }
 
@@ -433,6 +485,30 @@ mod test {
         assert_eq!(state.last_claim_ts, start_ts);
         assert_eq!(state.carry_points, 0);
         assert_eq!(state.lifetime_points, 0);
+        // #418: the state carries everything the dashboard needs in one call.
+        assert_eq!(state.rate, 1);
+        assert_eq!(state.started_at, start_ts);
+    }
+
+    #[test]
+    fn test_accrual_state_carries_rate_and_started_at() {
+        let (env, _admin, _registry, _token, client) = setup();
+        let user = Address::generate(&env);
+        let start_ts = env.ledger().timestamp();
+        start_basic(&env, &client, &user);
+
+        // The returned projection matches the stored record's rate and
+        // started_at instead of dropping them (#418).
+        let state = client.get_accrual_state(&user).unwrap();
+        assert_eq!(state.rate, 1);
+        assert_eq!(state.started_at, start_ts);
+
+        env.ledger().with_mut(|l| {
+            l.timestamp += 10 * HOUR;
+        });
+        let state = client.get_accrual_state(&user).unwrap();
+        assert_eq!(state.rate, 1);
+        assert_eq!(state.started_at, start_ts);
     }
 
     #[test]
@@ -564,6 +640,8 @@ mod test {
         assert_eq!(state.last_claim_ts, env.ledger().timestamp());
         assert_eq!(state.carry_points, 0);
         assert_eq!(state.lifetime_points, 0);
+        assert_eq!(state.rate, 1);
+        assert_eq!(state.started_at, env.ledger().timestamp());
     }
 
     #[test]
@@ -676,9 +754,39 @@ mod test {
     fn test_start_accrual_without_bots_fails() {
         let (env, _admin, _registry, _token, client) = setup();
         let user = Address::generate(&env);
+        // Registration is checked before the bot rate (#415), so an
+        // unregistered address without bots gets NotRegistered, not NoBots.
+        let result = client.try_start_accrual(&user);
+        assert_eq!(result, Err(Ok(AccrualError::NotRegistered)));
+        assert!(client.get_accrual_state(&user).is_none());
+    }
+
+    #[test]
+    fn test_start_accrual_registered_without_bots_fails_with_no_bots() {
+        let (env, _admin, registry, _token, client) = setup();
+        let user = Address::generate(&env);
+        register_user(&env, &registry, &user, "nobotuser");
+        // Registered but owns no bots: the error is NoBots, proving
+        // NotRegistered and NoBots are distinguishable (#415).
         let result = client.try_start_accrual(&user);
         assert_eq!(result, Err(Ok(AccrualError::NoBots)));
         assert!(client.get_accrual_state(&user).is_none());
+    }
+
+    #[test]
+    fn test_start_accrual_unregistered_with_bot_fails_then_succeeds_after_register() {
+        let (env, _admin, registry, _token, bot_nft, client) = setup_with_bot_nft();
+        let user = Address::generate(&env);
+        // Give the user a bot so the rate check would pass; the failure must
+        // still be NotRegistered because registration comes first (#415).
+        bot_nft.mint_basic(&user);
+        let result = client.try_start_accrual(&user);
+        assert_eq!(result, Err(Ok(AccrualError::NotRegistered)));
+        assert!(client.get_accrual_state(&user).is_none());
+        // Registering then starting works.
+        register_user(&env, &registry, &user, "latebloomer");
+        client.start_accrual(&user);
+        assert!(client.get_accrual_state(&user).is_some());
     }
 
     #[test]
@@ -693,8 +801,9 @@ mod test {
 
     #[test]
     fn test_start_accrual_basic_plus_gold_rate() {
-        let (env, _admin, _registry, _token, bot_nft, client) = setup_with_bot_nft();
+        let (env, _admin, registry, _token, bot_nft, client) = setup_with_bot_nft();
         let user = Address::generate(&env);
+        register_user(&env, &registry, &user, "goldrate");
         bot_nft.mint_basic(&user);
         let gold = bot_nft.get_bot(&bot_nft.admin_mint(&user, &BotTier::Gold));
         client.start_accrual(&user);
@@ -877,6 +986,112 @@ mod test {
         assert_eq!(profile.claimed_amt, 2);
     }
 
+    // --- Issue #417: the mint path (total >= points_per_amt) had zero
+    // coverage because every claim test stayed below the threshold.
+    // `deploy_all` wires the accrual contract as the token admin (mirroring
+    // `scripts/deploy.sh#wire_token_admin`), so these claims mint for real.
+    // Mint amounts are raw AMT units (`pending / points_per_amt`, AM-093).
+
+    #[test]
+    fn test_claim_exactly_at_threshold_mints_one() {
+        use automint_token::AMTTokenClient;
+        let (env, _admin, registry, token, accrual) = setup();
+        let token_client = AMTTokenClient::new(&env, &token);
+        let user = Address::generate(&env);
+        register_user(&env, &registry, &user, "exactthresh");
+        // Basic bot → 1 pt/hr; 100h → exactly 100 points = points_per_amt.
+        start_basic(&env, &accrual, &user);
+        env.ledger().with_mut(|l| {
+            l.timestamp += 100 * HOUR;
+            l.sequence_number += 1;
+        });
+
+        let pending = accrual.claim(&user, &token, &registry);
+        assert_eq!(pending, 100);
+        // 100 / 100 = 1 AMT minted, carry fully consumed.
+        assert_eq!(token_client.balance(&user), 1);
+        let state = accrual.get_accrual_state(&user).unwrap();
+        assert_eq!(state.carry_points, 0);
+        assert_eq!(state.lifetime_points, 100);
+    }
+
+    #[test]
+    fn test_claim_just_over_threshold_mints_one_with_carry() {
+        use automint_token::AMTTokenClient;
+        let (env, _admin, registry, token, accrual) = setup();
+        let token_client = AMTTokenClient::new(&env, &token);
+        let user = Address::generate(&env);
+        register_user(&env, &registry, &user, "justover");
+        // 101h → 101 points: 1 AMT minted, 1 point carried.
+        start_basic(&env, &accrual, &user);
+        env.ledger().with_mut(|l| {
+            l.timestamp += 101 * HOUR;
+            l.sequence_number += 1;
+        });
+
+        let pending = accrual.claim(&user, &token, &registry);
+        assert_eq!(pending, 101);
+        assert_eq!(token_client.balance(&user), 1);
+        let state = accrual.get_accrual_state(&user).unwrap();
+        assert_eq!(state.carry_points, 1);
+        assert_eq!(state.lifetime_points, 101);
+    }
+
+    #[test]
+    fn test_claim_several_multiples_mints_multiple() {
+        use automint_token::AMTTokenClient;
+        let (env, _admin, registry, token, accrual) = setup();
+        let token_client = AMTTokenClient::new(&env, &token);
+        let user = Address::generate(&env);
+        register_user(&env, &registry, &user, "multiples");
+        // 350h → 350 points: 3 AMT minted, 50 carried.
+        start_basic(&env, &accrual, &user);
+        env.ledger().with_mut(|l| {
+            l.timestamp += 350 * HOUR;
+            l.sequence_number += 1;
+        });
+
+        let pending = accrual.claim(&user, &token, &registry);
+        assert_eq!(pending, 350);
+        assert_eq!(token_client.balance(&user), 3);
+        let state = accrual.get_accrual_state(&user).unwrap();
+        assert_eq!(state.carry_points, 50);
+        assert_eq!(state.lifetime_points, 350);
+        let profile =
+            automint_registry::RegistryContractClient::new(&env, &registry).get_user(&user);
+        assert_eq!(profile.claimed_amt, 3);
+    }
+
+    #[test]
+    fn test_claim_carry_pushes_next_claim_over_threshold() {
+        use automint_token::AMTTokenClient;
+        let (env, _admin, registry, token, accrual) = setup();
+        let token_client = AMTTokenClient::new(&env, &token);
+        let user = Address::generate(&env);
+        register_user(&env, &registry, &user, "carryover");
+        start_basic(&env, &accrual, &user);
+
+        // First claim: 80h → 80 points, below threshold: no mint, carry 80.
+        env.ledger().with_mut(|l| {
+            l.timestamp += 80 * HOUR;
+            l.sequence_number += 1;
+        });
+        assert_eq!(accrual.claim(&user, &token, &registry), 80);
+        assert_eq!(token_client.balance(&user), 0);
+        assert_eq!(accrual.get_accrual_state(&user).unwrap().carry_points, 80);
+
+        // Second claim: 30h → 30 pending; 80 carry + 30 = 110 → 1 AMT, carry 10.
+        env.ledger().with_mut(|l| {
+            l.timestamp += 30 * HOUR;
+            l.sequence_number += 1;
+        });
+        assert_eq!(accrual.claim(&user, &token, &registry), 30);
+        assert_eq!(token_client.balance(&user), 1);
+        let state = accrual.get_accrual_state(&user).unwrap();
+        assert_eq!(state.carry_points, 10);
+        assert_eq!(state.lifetime_points, 110);
+    }
+
     // --- Issue #544: storage TTL / archival coverage ---
     //
     // UserAccrual is persistent storage bumped via
@@ -949,8 +1164,22 @@ mod test {
     fn test_claim_unregistered_user_returns_registry_call_failed() {
         let (env, _admin, registry, token, client) = setup();
         let user = Address::generate(&env);
-        // User starts accrual but is NOT registered in registry
-        start_basic(&env, &client, &user);
+        // `start_accrual` now rejects unregistered users up front (#415), so
+        // seed the accrual record directly to still cover the claim-time
+        // registry failure for a record whose user has no registry profile.
+        env.as_contract(&client.address, || {
+            env.storage().persistent().set(
+                &DataKey::UserAccrual(user.clone()),
+                &UserAccrual {
+                    user: user.clone(),
+                    rate: 1,
+                    last_claim_ts: env.ledger().timestamp(),
+                    carry_points: 0,
+                    lifetime_points: 0,
+                    started_at: env.ledger().timestamp(),
+                },
+            );
+        });
         env.ledger().with_mut(|l| {
             l.timestamp += 100 * HOUR;
         });
@@ -1035,7 +1264,7 @@ mod auth_tests {
             &String::from_str(&env, "AMT"),
         );
         bot_nft.initialize(&admin, &registry_id);
-        client.initialize(&admin, &bot_nft_id, &100_u64);
+        client.initialize(&admin, &bot_nft_id, &registry_id, &100_u64);
 
         Ctx {
             env,
@@ -1054,8 +1283,9 @@ mod auth_tests {
         let client = AccrualContractClient::new(&env, &id);
         let admin = Address::generate(&env);
         let bot_nft = Address::generate(&env);
+        let registry = Address::generate(&env);
 
-        let result = client.try_initialize(&admin, &bot_nft, &100_u64);
+        let result = client.try_initialize(&admin, &bot_nft, &registry, &100_u64);
         assert!(result.is_err());
     }
 
@@ -1066,24 +1296,33 @@ mod auth_tests {
         let client = AccrualContractClient::new(&env, &id);
         let admin = Address::generate(&env);
         let bot_nft = Address::generate(&env);
+        let registry = Address::generate(&env);
 
         env.mock_auths(&[MockAuth {
             address: &admin,
             invoke: &MockAuthInvoke {
                 contract: &id,
                 fn_name: "initialize",
-                args: (admin.clone(), bot_nft.clone(), 100_u64).into_val(&env),
+                args: (admin.clone(), bot_nft.clone(), registry.clone(), 100_u64)
+                    .into_val(&env),
                 sub_invokes: &[],
             },
         }]);
-        let result = client.try_initialize(&admin, &bot_nft, &100_u64);
+        let result = client.try_initialize(&admin, &bot_nft, &registry, &100_u64);
         assert!(result.is_ok());
+    }
+
+    fn register(ctx: &Ctx, user: &Address) {
+        ctx.env.mock_all_auths();
+        automint_registry::RegistryContractClient::new(&ctx.env, &ctx.registry_id)
+            .register(user, &String::from_str(&ctx.env, "authuser"));
     }
 
     #[test]
     fn test_start_accrual_fails_without_user_auth() {
         let ctx = setup();
         let user = Address::generate(&ctx.env);
+        register(&ctx, &user);
         mint_basic(&ctx, &user);
 
         ctx.env.mock_auths(&[]);
@@ -1095,6 +1334,7 @@ mod auth_tests {
     fn test_start_accrual_succeeds_with_user_auth() {
         let ctx = setup();
         let user = Address::generate(&ctx.env);
+        register(&ctx, &user);
         mint_basic(&ctx, &user);
 
         ctx.env.mock_auths(&[MockAuth {
@@ -1114,7 +1354,9 @@ mod auth_tests {
     fn test_claim_fails_without_user_auth() {
         let ctx = setup();
         let user = Address::generate(&ctx.env);
+        register(&ctx, &user);
         mint_basic(&ctx, &user);
+        ctx.env.mock_all_auths();
         ctx.client.start_accrual(&user);
 
         ctx.env.mock_auths(&[]);

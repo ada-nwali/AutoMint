@@ -821,6 +821,8 @@ export async function getAccrualState(userAddress: string): Promise<AccrualState
       stateRaw.lifetime_points ?? 0n,
       "lifetime_points"
     ),
+    rate: toBigIntOr(stateRaw.rate, 0n, "rate"),
+    started_at: toBigIntOr(stateRaw.started_at, 0n, "started_at"),
   };
 }
 
@@ -833,6 +835,8 @@ function parseAccrualState(raw: Record<string, unknown> | null | undefined): Acc
     last_claim_ts: toBigInt(raw.last_claim_ts, "last_claim_ts"),
     carry_points: toBigInt(raw.carry_points ?? 0n, "carry_points"),
     lifetime_points: toBigInt(raw.lifetime_points ?? 0n, "lifetime_points"),
+    rate: toBigIntOr(raw.rate, 0n, "rate"),
+    started_at: toBigIntOr(raw.started_at, 0n, "started_at"),
   };
 }
 
