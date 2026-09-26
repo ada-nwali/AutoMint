@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #![no_std]
+use automint_common::{extend_instance, extend_persistent, AdminStore, CommonDataKey, CommonError, PausableStore, LEDGER_BUMP, LEDGER_THRESHOLD};
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, symbol_short, Address, Env, String,
+    contract, contracterror, contractimpl, contracttype, symbol_short, Address, BytesN, Env, String,
 };
 
 #[derive(Clone)]
@@ -12,6 +13,7 @@ pub enum DataKey {
     Balance(Address),
     State,
     Admin,
+    TotalSupply,  // #338
 }
 
 #[derive(Clone)]
@@ -47,11 +49,10 @@ pub enum TokenError {
     NegativeAmount = 6,
     AllowanceExpired = 7,
     Overflow = 8,
+    Paused = 1000,  // #336
 }
 
-// ~7 days at 5s/ledger
-const LEDGER_BUMP: u32 = 120960;
-const LEDGER_THRESHOLD: u32 = 103680;
+// TTL constants moved to automint-common (#337)
 
 #[contract]
 pub struct AMTToken;
@@ -103,16 +104,15 @@ impl AMTToken {
         amount: i128,
         expiration_ledger: u32,
     ) -> Result<(), TokenError> {
-        if !env.storage().instance().has(&DataKey::State) {
+        PausableStore::require_not_paused(&env).map_err(|_| TokenError::Paused)?;  // #336
+                if !env.storage().instance().has(&DataKey::State) {
             return Err(TokenError::NotInitialized);
         }
         from.require_auth();
         if amount < 0 {
             return Err(TokenError::NegativeAmount);
         }
-        if from == spender {
-            return Err(TokenError::Unauthorized);
-        }
+        // #341: SEP-41 permits self-approval; removed from == spender rejection
         let key = DataKey::Allowance(AllowanceKey {
             from: from.clone(),
             spender: spender.clone(),
@@ -143,7 +143,8 @@ impl AMTToken {
     }
 
     pub fn transfer(env: Env, from: Address, to: Address, amount: i128) -> Result<(), TokenError> {
-        from.require_auth();
+        PausableStore::require_not_paused(&env).map_err(|_| TokenError::Paused)?;  // #336
+                from.require_auth();
 
         if amount < 0 {
             return Err(TokenError::NegativeAmount);
@@ -167,7 +168,8 @@ impl AMTToken {
         to: Address,
         amount: i128,
     ) -> Result<(), TokenError> {
-        spender.require_auth();
+        PausableStore::require_not_paused(&env).map_err(|_| TokenError::Paused)?;  // #336
+                spender.require_auth();
 
         // Reject negative amounts before touching allowance or balances
         if amount < 0 {
@@ -194,6 +196,7 @@ impl AMTToken {
     }
 
     pub fn burn(env: Env, from: Address, amount: i128) -> Result<(), TokenError> {
+        PausableStore::require_not_paused(&env).map_err(|_| TokenError::Paused)?;  // #336
         from.require_auth();
 
         // Validate amount is not negative
@@ -216,6 +219,11 @@ impl AMTToken {
         env.storage()
             .persistent()
             .set(&DataKey::Balance(from.clone()), &(balance - amount));
+
+        // #338: Update total supply
+        let current_supply = Self::total_supply(env.clone());
+        let new_supply = current_supply.checked_sub(amount).ok_or(TokenError::Overflow)?;
+        env.storage().persistent().set(&DataKey::TotalSupply, &new_supply);
         // #544: as with do_transfer, refresh the balance entry's TTL on
         // every write instead of only on mint.
         env.storage().persistent().extend_ttl(
@@ -232,6 +240,7 @@ impl AMTToken {
     }
 
     pub fn mint(env: Env, to: Address, amount: i128) -> Result<(), TokenError> {
+        PausableStore::require_not_paused(&env).map_err(|_| TokenError::Paused)?;  // #336
         Self::require_admin(&env)?;
         if amount < 0 {
             return Err(TokenError::NegativeAmount);
@@ -244,6 +253,11 @@ impl AMTToken {
 
         let balance = Self::balance(env.clone(), to.clone());
         let new_balance = balance.checked_add(amount).ok_or(TokenError::Overflow)?;
+
+        // #338: Update total supply
+        let current_supply = Self::total_supply(env.clone());
+        let new_supply = current_supply.checked_add(amount).ok_or(TokenError::Overflow)?;
+        env.storage().persistent().set(&DataKey::TotalSupply, &new_supply);
         env.storage()
             .persistent()
             .set(&DataKey::Balance(to.clone()), &new_balance);
@@ -293,6 +307,43 @@ impl AMTToken {
             .instance()
             .get::<_, Address>(&DataKey::Admin)
             .ok_or(TokenError::NotInitialized)
+    }
+
+    /// Returns the total supply of tokens (#338)
+    pub fn total_supply(env: Env) -> i128 {
+        env.storage()
+            .persistent()
+            .get(&DataKey::TotalSupply)
+            .unwrap_or(0)
+    }
+
+    /// Checks if the contract is paused (#336)
+    pub fn paused(env: Env) -> bool {
+        PausableStore::is_paused(&env)
+    }
+
+    /// Pauses the contract (admin-only) (#336)
+    pub fn pause(env: Env) -> Result<(), TokenError> {
+        Self::require_admin(&env)?;
+        PausableStore::set_paused(&env, true);
+        env.events().publish((symbol_short!("pause"),), true);
+        Ok(())
+    }
+
+    /// Unpauses the contract (admin-only) (#336)
+    pub fn unpause(env: Env) -> Result<(), TokenError> {
+        Self::require_admin(&env)?;
+        PausableStore::set_paused(&env, false);
+        env.events().publish((symbol_short!("unpause"),), false);
+        Ok(())
+    }
+
+    /// Upgrades the contract wasm (admin-only) (#336)
+    pub fn upgrade(env: Env, new_wasm_hash: BytesN<32>) -> Result<(), TokenError> {
+        Self::require_admin(&env)?;
+        env.deployer().update_current_contract_wasm(new_wasm_hash);
+        env.events().publish((symbol_short!("upgrade"),), ());
+        Ok(())
     }
 
     pub fn decimals(env: Env) -> Result<u32, TokenError> {
