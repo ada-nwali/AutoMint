@@ -71,7 +71,7 @@ impl AMTToken {
         }
         admin.require_auth();
         if decimal == 0 {
-            return Err(TokenError::NegativeAmount);
+            return Err(TokenError::InvalidDecimals);
         }
         let state = TokenState {
             decimal,
