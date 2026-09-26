@@ -69,11 +69,15 @@ jobs:
         working-directory: frontend
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: npm
           cache-dependency-path: frontend/package-lock.json
+      - name: Check for committed .env files (#486)
+        run: ../scripts/check-env.sh "${{ github.event.pull_request.base.sha || format('{0}~1', github.sha) }}...${{ github.sha }}"
       - name: Install dependencies
         run: npm ci
       - name: Lint

@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   getAccrualState,
+  getAccrualConfig,
   getUserProfile,
   isRegistered,
   getUserBots,
@@ -256,6 +257,21 @@ export function useBots() {
     refetchInterval: pollWhenVisible(),
     staleTime: STALE_TIME.STANDARD,
     gcTime: GC_TIME.STANDARD,
+  });
+}
+
+/**
+ * The accrual contract's on-chain config (currently: `points_per_amt`) —
+ * fetched once and cached with `STALE_TIME.STATIC` since it only changes
+ * on redeploy (#477). Not gated on wallet connection: it's the same for
+ * every user and can be read with the anonymous read source.
+ */
+export function useAccrualConfig() {
+  return useQuery({
+    queryKey: qk.accrualConfig(),
+    queryFn: () => getAccrualConfig(),
+    staleTime: STALE_TIME.STATIC,
+    gcTime: GC_TIME.LONG,
   });
 }
 
@@ -547,12 +563,25 @@ export interface AnimatedPoints {
   /** Points accrued since the last claim, recomputed each animation tick. */
   pending: bigint;
   /**
-   * The sub-threshold carry toward the next AMT (0 .. POINTS_PER_AMT - 1),
+   * The sub-threshold carry toward the next AMT (0 .. pointsPerAmt - 1),
    * taken straight from the accrual state. Shown separately as "progress to
    * next AMT" — it is NOT part of the headline, which is why folding it in
    * made the headline reset after every claim (#491, AM-084).
    */
   progressToNext: bigint;
+  /**
+   * The conversion threshold itself, fetched from the accrual contract's
+   * `config()` (#477) — never a hardcoded constant, so a redeploy that
+   * changes it updates the UI without a frontend rebuild. `undefined`
+   * while the config query is still loading; consumers should treat that
+   * the same as "don't render a percentage yet."
+   */
+  pointsPerAmt: number | undefined;
+  /**
+   * `progressToNext / pointsPerAmt`, in `[0, 1)` — ready to feed straight
+   * into a progress bar. `undefined` until the config query resolves.
+   */
+  progressToNextRatio: number | undefined;
 }
 
 export function useAnimatedPoints(): AnimatedPoints {
@@ -560,6 +589,7 @@ export function useAnimatedPoints(): AnimatedPoints {
 
   const { data: accrualState } = useAccrualState();
   const { data: profile } = useProfile();
+  const { data: accrualConfig } = useAccrualConfig();
   // The user's real on-chain rate across all their bots (#490), not a default.
   // When the accrual state carries its own `rate` (AM-101) read it from there
   // instead, so the interpolation matches the contract's own view exactly.
@@ -596,6 +626,17 @@ export function useAnimatedPoints(): AnimatedPoints {
   // progressToNext uses carry_points.
   const lifetime = accrualState?.lifetime_points ?? profile?.points ?? BigInt(0);
   const progressToNext = accrualState?.carry_points ?? BigInt(0);
+  const pointsPerAmt = accrualConfig?.pointsPerAmt;
+  const progressToNextRatio =
+    pointsPerAmt && pointsPerAmt > 0
+      ? Number(progressToNext) / pointsPerAmt
+      : undefined;
 
-  return { total: lifetime + pending, pending, progressToNext };
+  return {
+    total: lifetime + pending,
+    pending,
+    progressToNext,
+    pointsPerAmt,
+    progressToNextRatio,
+  };
 }

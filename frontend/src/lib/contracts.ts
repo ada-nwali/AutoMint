@@ -253,38 +253,45 @@ export function parseUserProfile(
  * to `"Basic"` and understating a bot's value. A real-simulation fixture is
  * in `contracts.test.ts` (`realBotFixture`).
  */
-export function parseBotNFT(rawData: Record<string, unknown>): BotNFT {
-  const VALID_TIERS: readonly BotTier[] = [
-    "Basic",
-    "Bronze",
-    "Silver",
-    "Gold",
-    "Diamond",
-  ];
+const VALID_BOT_TIERS: readonly BotTier[] = [
+  "Basic",
+  "Bronze",
+  "Silver",
+  "Gold",
+  "Diamond",
+];
 
-  const rawTier = rawData.tier;
-  let tier: BotTier;
-
+/**
+ * Shared by every parser that decodes a `BotTier` field (bots, marketplace
+ * listings) — see the `parseBotNFT` doc comment above for why both the bare
+ * string and one-element-array shapes are accepted, and why an unrecognized
+ * shape throws instead of silently defaulting to `"Basic"`.
+ */
+function parseBotTier(rawTier: unknown, context: string): BotTier {
   if (typeof rawTier === "string") {
-    if (!VALID_TIERS.includes(rawTier as BotTier)) {
-      throw new Error(`parseBotNFT: unrecognized tier "${rawTier}"`);
+    if (!VALID_BOT_TIERS.includes(rawTier as BotTier)) {
+      throw new Error(`${context}: unrecognized tier "${rawTier}"`);
     }
-    tier = rawTier as BotTier;
-  } else if (
+    return rawTier as BotTier;
+  }
+  if (
     Array.isArray(rawTier) &&
     rawTier.length === 1 &&
     typeof rawTier[0] === "string"
   ) {
     const candidate = rawTier[0] as string;
-    if (!VALID_TIERS.includes(candidate as BotTier)) {
-      throw new Error(`parseBotNFT: unrecognized tier "${candidate}"`);
+    if (!VALID_BOT_TIERS.includes(candidate as BotTier)) {
+      throw new Error(`${context}: unrecognized tier "${candidate}"`);
     }
-    tier = candidate as BotTier;
-  } else {
-    throw new Error(
-      `parseBotNFT: unexpected tier shape ${JSON.stringify(rawTier)}; expected "Gold" or ["Gold"]`
-    );
+    return candidate as BotTier;
   }
+  throw new Error(
+    `${context}: unexpected tier shape ${JSON.stringify(rawTier)}; expected "Gold" or ["Gold"]`
+  );
+}
+
+export function parseBotNFT(rawData: Record<string, unknown>): BotNFT {
+  const tier = parseBotTier(rawData.tier, "parseBotNFT");
 
   return {
     id: toBigInt(rawData.id, "id"),
@@ -311,8 +318,11 @@ export function parseListing(
     id: toBigInt(rawData.id, "id"),
     seller: String(rawData.seller ?? ""),
     bot_id: toBigInt(rawData.bot_id, "bot_id"),
+    bot_tier: parseBotTier(rawData.bot_tier, "parseListing"),
     price: toBigInt(rawData.price, "price"),
+    currency: String(rawData.currency ?? ""),
     listed_at: toBigInt(rawData.listed_at, "listed_at"),
+    active: Boolean(rawData.active),
   };
 }
 
@@ -787,6 +797,32 @@ export async function getAccrualState(userAddress: string): Promise<AccrualState
       "lifetime_points"
     ),
   };
+}
+
+/**
+ * Get the accrual contract's on-chain config — currently just
+ * `points_per_amt`, the number of points that convert to 1 AMT.
+ *
+ * This is the source of truth for that conversion threshold (#477): it
+ * used to be a hardcoded frontend env var (`NEXT_PUBLIC_POINTS_PER_AMT`,
+ * defaulting to 1000) that disagreed with `scripts/deploy.sh`'s actual
+ * `initialize(..., 100)` call, silently putting every client-side
+ * "points to next AMT" figure off by 10x. Callers should fetch this once
+ * via `useAccrualConfig()` (long `staleTime` — it only changes on
+ * redeploy) rather than importing a constant.
+ */
+export async function getAccrualConfig(
+  sourceAddress?: string
+): Promise<{ pointsPerAmt: number }> {
+  const source = defaultSource(sourceAddress);
+  const raw = await simulateContractCall<Record<string, unknown>>(
+    ACCRUAL_CONTRACT_ID,
+    "config",
+    [],
+    source
+  );
+  const pointsPerAmt = toBigInt(raw?.points_per_amt, "points_per_amt");
+  return { pointsPerAmt: Number(pointsPerAmt) };
 }
 
 /**

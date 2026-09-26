@@ -94,9 +94,6 @@ export const CONTRACT_ADDRESSES: Readonly<Record<ContractName, string>> = {
 export const TX_TIMEOUT = Number(process.env.NEXT_PUBLIC_TX_TIMEOUT) || 30;
 export const BASE_FEE = process.env.NEXT_PUBLIC_BASE_FEE ?? "100";
 
-/** Points-to-AMT conversion threshold. */
-export const POINTS_PER_AMT = Number(process.env.NEXT_PUBLIC_POINTS_PER_AMT) || 100;
-
 /** Leaderboard pagination limit. */
 export const LEADERBOARD_LIMIT = Number(process.env.NEXT_PUBLIC_LEADERBOARD_LIMIT) || 50;
 

@@ -81,6 +81,21 @@ Enable the repository pre-commit hook to catch formatting and lint issues automa
 git config core.hooksPath .githooks
 ```
 
+### Never commit `.env*` files (#486)
+
+Every `.env*` file except `frontend/.env.example` must stay local — real
+values (contract IDs, RPC URLs, Sentry tokens) belong in `.env.local`,
+which `.gitignore` already excludes. The pre-commit hook (`scripts/check-env.sh`)
+fails the commit if one is staged anyway (e.g. via `git add -f`), and the
+same check runs in CI on the PR's diff so a bypassed local hook doesn't
+still get through. Run it manually with:
+
+```bash
+cd frontend && npm run check:env
+```
+
+If the hook fires, unstage the file — don't force past it.
+
 ---
 
 ## Code Style & Enforcement Mechanisms

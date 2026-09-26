@@ -9,6 +9,11 @@
 
 set -e
 
+# #486: fail the commit if any .env* file other than .env.example is staged.
+# .gitignore covers frontend/.env.local, but nothing stopped `git add -f`
+# from publishing it (or any future non-public var added there).
+"$(git rev-parse --show-toplevel)/scripts/check-env.sh"
+
 changed_frontend=$(git diff --cached --name-only --diff-filter=ACM | grep -E '^frontend/.*\.(ts|tsx)$' || true)
 changed_rust=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.rs$' || true)
 
