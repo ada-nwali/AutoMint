@@ -122,7 +122,11 @@ impl DeploymentBuilder {
 
         let accrual_id = env.register_contract(None, AccrualContract);
         let accrual = AccrualContractClient::new(&env, &accrual_id);
-        accrual.initialize(&admin, &bot_nft_id, &self.points_per_amt);
+        accrual.initialize(&admin, &bot_nft_id, &registry_id, &self.points_per_amt);
+
+        // Mirror `scripts/deploy.sh#wire_token_admin`: the accrual contract is
+        // the token admin so `claim` can mint AMT (#417).
+        token.set_admin(&accrual_id);
 
         let marketplace_id = env.register_contract(None, MarketplaceContract);
         let marketplace = MarketplaceContractClient::new(&env, &marketplace_id);

@@ -71,6 +71,8 @@ const mockHooks = {
     last_claim_ts: BigInt(Math.floor(Date.now() / 1000) - 3600),
     carry_points: BigInt(50),
     lifetime_points: BigInt(2500),
+    rate: BigInt(1),
+    started_at: BigInt(Math.floor(Date.now() / 1000) - 7200),
   },
   accrualLoading: false,
   amtBalance: BigInt(25),

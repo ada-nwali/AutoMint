@@ -48,7 +48,9 @@ Returns the new listing ID on success.
 Errors:
 - `InvalidPrice`: Price must be strictly positive
 - `NotInitialized`: Marketplace not initialized
-- `BotTransferFailed`: Bot does not exist or caller is not the owner
+- `BotNotFound`: Bot does not exist
+- `NotBotOwner`: Caller is not the bot's owner
+- `BotTransferFailed`: Genuine escrow transfer failure
 
 ---
 
@@ -195,7 +197,7 @@ Marketplace configuration stored during initialization.
 | `AlreadyInitialized` | 1 | Marketplace was already initialized |
 | `NotInitialized` | 2 | Marketplace has not been initialized |
 | `InvalidPrice` | 3 | Price must be strictly positive |
-| `BotTransferFailed` | 4 | Failed to transfer bot (doesn't exist or wrong owner) |
+| `BotTransferFailed` | 4 | Genuine escrow transfer failure |
 | `ListingNotFound` | 5 | Listing does not exist |
 | `NotSeller` | 6 | Caller is not the listing seller |
 | `ListingInactive` | 7 | Listing is not active |
@@ -204,6 +206,8 @@ Marketplace configuration stored during initialization.
 | `Unauthorized` | 10 | Caller is not authorized for this action |
 | `PaymentFailed` | 11 | Payment transfer failed |
 | `Overflow` | 12 | Arithmetic overflow occurred |
+| `BotNotFound` | 20 | Bot does not exist (`list_bot`) |
+| `NotBotOwner` | 21 | Caller is not the bot's owner (`list_bot`) |
 
 ---
 

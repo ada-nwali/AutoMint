@@ -227,7 +227,8 @@ pub enum MarketplaceError {
     InvalidBotNft = 17,
     ContractPaused = 18,
     NoPendingAdmin = 19,
-    AlreadyListed = 20,
+    BotNotFound = 20,
+    NotBotOwner = 21,
 }
 
 /// Every bot tier, in order, for per-tier reporting.
@@ -399,27 +400,23 @@ impl MarketplaceContract {
             return Err(MarketplaceError::PriceTooLow);
         }
 
-        // Fetch the bot's tier from the NFT contract.
+        // Fetch the bot from the NFT contract. A missing bot maps to
+        // BotNotFound (no extra cross-contract call is spent), and a bot
+        // owned by someone else maps to NotBotOwner — both checked before
+        // the escrow transfer, which keeps BotTransferFailed for genuine
+        // transfer failures (#427).
         let bot_client = BotNFTContractClient::new(&env, &config.bot_nft);
         let bot = bot_client
             .try_get_bot(&bot_id)
-            .map_err(|_| MarketplaceError::BotTransferFailed)?
-            .map_err(|_| MarketplaceError::BotTransferFailed)?;
+            .map_err(|_| MarketplaceError::BotNotFound)?
+            .map_err(|_| MarketplaceError::BotNotFound)?;
+        if bot.owner != seller {
+            return Err(MarketplaceError::NotBotOwner);
+        }
         let bot_tier = bot.tier;
 
-        // Check if bot is already listed (#428).
-        if env
-            .storage()
-            .persistent()
-            .get::<_, u64>(&DataKey::BotListing(bot_id))
-            .is_some()
-        {
-            return Err(MarketplaceError::AlreadyListed);
-        }
-
-        // Escrow the bot into the marketplace. The transfer fails (and we
-        // surface BotTransferFailed instead of panicking) when the bot does not
-        // exist or the seller is not its owner.
+        // Escrow the bot into the marketplace. A failure here is a genuine
+        // transfer failure, surfaced as BotTransferFailed.
         let marketplace = env.current_contract_address();
         if bot_client
             .try_transfer(&bot_id, &seller, &marketplace)

@@ -84,7 +84,31 @@ export function classifyError(error: unknown): ClassifiedError {
     };
   }
 
-  // 3. Soroban Smart Contract Errors (AM-035)
+  // 3a. Distinct marketplace list_bot failures (#427): a missing bot and a
+  // bot owned by someone else are different causes from a genuine escrow
+  // transfer failure, so they get their own titles/messages.
+  if (lower.includes("botnotfound")) {
+    return {
+      category: "contract",
+      title: "Bot Not Found",
+      message:
+        "That bot does not exist. Check the bot ID and try again.",
+      isRetryable: false,
+      raw: error,
+    };
+  }
+  if (lower.includes("notbotowner")) {
+    return {
+      category: "contract",
+      title: "Not Bot Owner",
+      message:
+        "You do not own that bot, so it cannot be listed from this wallet.",
+      isRetryable: false,
+      raw: error,
+    };
+  }
+
+  // 3b. Soroban Smart Contract Errors (AM-035)
   if (
     lower.includes("simulation failed") ||
     lower.includes("contract") ||
@@ -98,7 +122,8 @@ export function classifyError(error: unknown): ClassifiedError {
     lower.includes("alreadyinitialized") ||
     lower.includes("registrycallfailed") ||
     lower.includes("tokenmintfailed") ||
-    lower.includes("listingstale")
+    lower.includes("listingstale") ||
+    lower.includes("bottransferfailed")
   ) {
     return {
       category: "contract",

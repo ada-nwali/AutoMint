@@ -590,10 +590,10 @@ export function useAnimatedPoints(): AnimatedPoints {
   const { data: accrualState } = useAccrualState();
   const { data: profile } = useProfile();
   const { data: accrualConfig } = useAccrualConfig();
-  // The user's real on-chain rate across all their bots (#490), not a default.
-  // When the accrual state carries its own `rate` (AM-101) read it from there
-  // instead, so the interpolation matches the contract's own view exactly.
-  const { data: ratePerHour } = useUserTotalRate();
+  // The rate rides along on the accrual state itself (#418), so the
+  // interpolation matches the contract's own view in a single call — no
+  // separate rate query and no ratePerHour argument.
+  const ratePerHour = accrualState?.rate;
   const offsetMs = useLedgerTimeOffset();
   const offsetRef = useRef(offsetMs);
   offsetRef.current = offsetMs;
