@@ -83,6 +83,16 @@ export interface AccrualState {
   lifetime_points: bigint;
 }
 
+/** Marketplace sales statistics for one bot tier (#432). Amounts are base units. */
+export interface TierStats {
+  tier: BotTier;
+  volume: bigint;
+  sale_count: bigint;
+  last_sale_price: bigint;
+  /** Lowest active listing price; 0n when nothing is listed. */
+  floor_price: bigint;
+}
+
 /**
  * Presentational tier fields only. Rates and prices are contract data, read
  * from bot_nft by `useTiers` (#478) — never hardcode them here.

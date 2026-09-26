@@ -13,6 +13,7 @@ import {
 import { useAllBotDetails } from "@/hooks/useBotDetails";
 import { useBots } from "@/hooks/useAccrual";
 import BotListingCard from "@/components/marketplace/BotListingCard";
+import MarketStats from "@/components/marketplace/MarketStats";
 import BotCard from "@/components/dashboard/BotCard";
 import ListBotModal from "@/components/marketplace/ListBotModal";
 import { CardSkeleton, BotCardSkeleton } from "@/components/ui/Skeleton";
@@ -358,6 +359,7 @@ export default function MarketplacePage() {
 
       {tab === "all" ? (
         <section id="marketplace-all" role="tabpanel" aria-label="All listings">
+          <MarketStats />
           {renderFilters()}
           {renderListingGrid(
             isListingsLoading,

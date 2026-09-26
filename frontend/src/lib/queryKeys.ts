@@ -87,4 +87,9 @@ export const qk = {
   listings: (): QueryKey => ["listings"],
   myListings: (address: string | null): QueryKey => ["myListings", address],
   leaderboard: (limit: number): QueryKey => ["leaderboard", limit],
+  leaderboardAccruals: (addresses: string[]): QueryKey => [
+    "leaderboardAccruals",
+    addresses.join(","),
+  ],
+  marketStats: (): QueryKey => ["marketStats"],
 } as const;

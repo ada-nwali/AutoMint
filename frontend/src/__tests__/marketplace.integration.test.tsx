@@ -50,6 +50,7 @@ const mockMarketplace = {
 };
 
 jest.mock("@/hooks/useMarketplace", () => ({
+  useMarketStats: () => ({ data: undefined }),
   useListings: () => ({
     data: mockMarketplace.allListings,
     isLoading: mockMarketplace.allLoading,

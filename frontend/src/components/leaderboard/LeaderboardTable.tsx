@@ -3,7 +3,7 @@
 import React from "react";
 import { motion } from "framer-motion";
 import clsx from "clsx";
-import { formatPoints, type UserProfile } from "@/types";
+import { formatPoints, type AccrualState, type UserProfile } from "@/types";
 import type { UserRank } from "@/lib/contracts";
 import { truncateAddress, fullAddressTitle, fullAddressAriaLabel, useCopyToClipboard } from "@/lib/truncateAddress";
 
@@ -33,6 +33,12 @@ export interface LeaderboardTableProps {
    * and ignored when the user already has a row above.
    */
   currentUserRank?: UserRank | null;
+  /**
+   * Accrual state per address, fetched for all rows in one contract call
+   * (`useLeaderboardAccruals`, #420). When present for a row, the row also
+   * shows that user's lifetime accrued points.
+   */
+  accrualStates?: Record<string, AccrualState | null> | undefined;
 }
 
 const RANK_ICON: Record<number, { icon: string; color: string; label: string }> = {
@@ -115,6 +121,7 @@ function LeaderboardTableComponent({
   users,
   currentAddress,
   currentUserRank,
+  accrualStates,
 }: LeaderboardTableProps) {
   if (!users || users.length === 0) {
     return (
@@ -227,6 +234,14 @@ function LeaderboardTableComponent({
                     returned; never narrowed to a JS number. */}
                 <td className="px-2 py-3 text-right font-semibold text-text sm:px-4">
                   {formatPoints(user.points)}
+                  {accrualStates?.[user.address] && (
+                    <span
+                      className="block text-[10px] font-normal text-muted"
+                      data-testid={`accrual-lifetime-${user.rank}`}
+                    >
+                      {formatPoints(accrualStates[user.address]!.lifetime_points)} lifetime
+                    </span>
+                  )}
                 </td>
 
                 {/* Truncated address */}
