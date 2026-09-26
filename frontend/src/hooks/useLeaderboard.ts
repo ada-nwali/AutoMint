@@ -4,10 +4,9 @@ import { useWalletStore, selectPublicKey } from "@/store/walletStore";
 import type { UserProfile } from "@/types";
 import { pollWhenVisible } from "@/lib/polling";
 import { STALE_TIME, GC_TIME, qk } from "@/lib/queryKeys";
+import { LEADERBOARD_LIMIT } from "@/lib/constants";
 
-const DEFAULT_LEADERBOARD_LIMIT = 50;
-
-export function useLeaderboard(limit = DEFAULT_LEADERBOARD_LIMIT) {
+export function useLeaderboard(limit = LEADERBOARD_LIMIT) {
   return useQuery<UserProfile[]>({
     queryKey: qk.leaderboard(limit),
     queryFn: () => getLeaderboard(limit),

@@ -7,6 +7,8 @@ import {
 } from "@stellar/stellar-sdk";
 import {
   BASE_FEE,
+  HORIZON_URL,
+  POLL_INTERVAL_MS,
   SOROBAN_RPC_URL,
   SOROBAN_RPC_URLS,
   STELLAR_NETWORK_PASSPHRASE,
@@ -155,9 +157,7 @@ export function summarizeArgs(args: xdr.ScVal[]): string {
  * Build explorer URL from transaction hash.
  */
 function buildExplorerUrl(hash: string): string {
-  const horizonUrl = process.env.NEXT_PUBLIC_HORIZON_URL || "";
-  if (!horizonUrl) return "";
-  return `${horizonUrl}/transactions/${hash}`;
+  return `${HORIZON_URL}/transactions/${hash}`;
 }
 
 /**
@@ -538,8 +538,6 @@ async function executeTransactionInternal(
   }
 }
 
-const getPollIntervalMs = (): number =>
-  Number(process.env.NEXT_PUBLIC_POLL_INTERVAL_MS) || 1000;
 
 /**
  * Interpret one `getTransaction` response: a final outcome for SUCCESS /
@@ -601,7 +599,7 @@ async function resumeOne(record: TxRecord): Promise<void> {
       return;
     }
 
-    await new Promise((resolve) => setTimeout(resolve, getPollIntervalMs()));
+    await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
   } while (Date.now() - startTime < maxWaitMs);
 }
 

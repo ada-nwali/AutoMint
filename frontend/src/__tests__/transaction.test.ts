@@ -22,7 +22,9 @@ import { Account, Keypair, nativeToScVal } from "@stellar/stellar-sdk";
 import { toast } from "sonner";
 import { useListBot } from "@/hooks/useMarketplace";
 import { resumePendingTransactions, __resetSequenceStateForTests } from "@/lib/transaction";
-import { MARKETPLACE_CONTRACT_ID, STELLAR_NETWORK_PASSPHRASE } from "@/lib/constants";
+import { CONTRACT_ADDRESSES, STELLAR_NETWORK_PASSPHRASE } from "@/lib/constants";
+
+const MARKETPLACE_CONTRACT_ID = CONTRACT_ADDRESSES.marketplace;
 import { useTxStore, type TxRecord } from "@/store/txStore";
 import { useWalletStore } from "@/store/walletStore";
 
@@ -34,8 +36,13 @@ jest.mock("@/lib/constants", () => {
   const { StrKey } = jest.requireActual("@stellar/stellar-sdk");
   return {
     ...jest.requireActual("@/lib/constants"),
-    MARKETPLACE_CONTRACT_ID: StrKey.encodeContract(Buffer.alloc(32, 1)),
-    TOKEN_CONTRACT_ID: StrKey.encodeContract(Buffer.alloc(32, 2)),
+    CONTRACT_ADDRESSES: {
+      ...jest.requireActual("@/lib/constants").CONTRACT_ADDRESSES,
+      marketplace: StrKey.encodeContract(Buffer.alloc(32, 1)),
+      token: StrKey.encodeContract(Buffer.alloc(32, 2)),
+    },
+    // Poll at 1ms so the real-timer loops stay instant.
+    POLL_INTERVAL_MS: 1,
   };
 });
 
@@ -151,15 +158,12 @@ const errorToast = toast.error as jest.Mock;
 const loadingToast = toast.loading as jest.Mock;
 
 beforeAll(() => {
-  // The hook reads the contract ID straight from the environment; resume polls
-  // at 1ms so its real-timer loops stay instant.
+  // The hook reads the contract ID straight from the environment.
   process.env.NEXT_PUBLIC_MARKETPLACE_CONTRACT_ID = MARKETPLACE_CONTRACT_ID;
-  process.env.NEXT_PUBLIC_POLL_INTERVAL_MS = "1";
 });
 
 afterAll(() => {
   delete process.env.NEXT_PUBLIC_MARKETPLACE_CONTRACT_ID;
-  delete process.env.NEXT_PUBLIC_POLL_INTERVAL_MS;
 });
 
 beforeEach(() => {

@@ -18,9 +18,8 @@ import type { AccrualState, UserProfile } from "@/types";
 import { pollWhenVisible } from "@/lib/polling";
 import { STALE_TIME, GC_TIME, qk, DASHBOARD_POLL_MS } from "@/lib/queryKeys";
 import { trackStatus, newTxId } from "@/components/ui/TxStatus";
+import { COUNTER_TICK_MS } from "@/lib/constants";
 
-const BASIC_BOT_RATE = 1; // Basic bot accrual rate
-const UPDATE_INTERVAL = 1000; // Update every second
 const POINTS_PER_HOUR_DIVISOR = 3600; // Seconds in an hour
 
 /** Identifiers for the three on-chain registration steps. */
@@ -183,10 +182,8 @@ export function useRegister() {
               step.label,
               ACCRUAL_CONTRACT_ID,
               "start_accrual",
-              [
-                nativeToScVal(publicKey, { type: "address" }),
-                nativeToScVal(BASIC_BOT_RATE, { type: "u32" }),
-              ]
+              // The contract derives the rate from the user's bots (#319).
+              [nativeToScVal(publicKey, { type: "address" })]
             );
             break;
         }
@@ -591,7 +588,7 @@ export function useAnimatedPoints(): AnimatedPoints {
     };
 
     tick();
-    const interval = setInterval(tick, UPDATE_INTERVAL);
+    const interval = setInterval(tick, COUNTER_TICK_MS);
     return () => clearInterval(interval);
   }, [accrualState, ratePerHour]);
 

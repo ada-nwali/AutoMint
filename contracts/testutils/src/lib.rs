@@ -122,7 +122,7 @@ impl DeploymentBuilder {
 
         let accrual_id = env.register_contract(None, AccrualContract);
         let accrual = AccrualContractClient::new(&env, &accrual_id);
-        accrual.initialize(&admin, &self.points_per_amt);
+        accrual.initialize(&admin, &bot_nft_id, &self.points_per_amt);
 
         let marketplace_id = env.register_contract(None, MarketplaceContract);
         let marketplace = MarketplaceContractClient::new(&env, &marketplace_id);
