@@ -14,6 +14,7 @@ pub enum DataKey {
     State,
     Admin,
     TotalSupply,  // #338
+    MaxSupply,    // #339
 }
 
 #[derive(Clone)]
@@ -50,6 +51,8 @@ pub enum TokenError {
     AllowanceExpired = 7,
     Overflow = 8,
     Paused = 1000,  // #336
+    SupplyCapExceeded = 9,  // #339
+    InvalidDecimals = 10,   // referenced in tests
 }
 
 // TTL constants moved to automint-common (#337)
@@ -155,7 +158,15 @@ impl AMTToken {
         }
 
         if from == to {
-            return Err(TokenError::Unauthorized);
+            let balance = Self::balance(env.clone(), from.clone());
+            if balance < amount {
+                return Err(TokenError::InsufficientBalance);
+            }
+            env.events().publish(
+                (symbol_short!("transfer"), from.clone(), to.clone()),
+                amount,
+            );
+            return Ok(());
         }
 
         Self::do_transfer(&env, &from, &to, amount)
@@ -186,12 +197,21 @@ impl AMTToken {
             return Err(TokenError::Unauthorized);
         }
 
-        // Sending to yourself is always a no-op: reject it to avoid pointless state writes
+        Self::spend_allowance(&env, &from, &spender, amount)?;
+
+        // Self-transfer is a no-op but still consumes allowance (checked above)
         if from == to {
-            return Err(TokenError::Unauthorized);
+            let balance = Self::balance(env.clone(), from.clone());
+            if balance < amount {
+                return Err(TokenError::InsufficientBalance);
+            }
+            env.events().publish(
+                (symbol_short!("transfer"), from.clone(), to.clone()),
+                amount,
+            );
+            return Ok(());
         }
 
-        Self::spend_allowance(&env, &from, &spender, amount)?;
         Self::do_transfer(&env, &from, &to, amount)
     }
 
@@ -257,6 +277,14 @@ impl AMTToken {
         // #338: Update total supply
         let current_supply = Self::total_supply(env.clone());
         let new_supply = current_supply.checked_add(amount).ok_or(TokenError::Overflow)?;
+
+        // #339: Check supply cap
+        if let Some(cap) = Self::max_supply(env.clone()) {
+            if new_supply > cap {
+                return Err(TokenError::SupplyCapExceeded);
+            }
+        }
+
         env.storage().persistent().set(&DataKey::TotalSupply, &new_supply);
         env.storage()
             .persistent()
@@ -315,6 +343,39 @@ impl AMTToken {
             .persistent()
             .get(&DataKey::TotalSupply)
             .unwrap_or(0)
+    }
+
+    /// Returns the max supply cap, if set (#339)
+    pub fn max_supply(env: Env) -> Option<i128> {
+        env.storage().persistent().get(&DataKey::MaxSupply)
+    }
+
+    /// Admin-only: set the maximum supply cap. Fails if cap is below current supply (#339)
+    pub fn set_max_supply(env: Env, new_cap: Option<i128>) -> Result<(), TokenError> {
+        Self::require_admin(&env)?;
+
+        if let Some(cap) = new_cap {
+            if cap < 0 {
+                return Err(TokenError::NegativeAmount);
+            }
+            let current_supply = Self::total_supply(env.clone());
+            if cap < current_supply {
+                return Err(TokenError::SupplyCapExceeded);
+            }
+        }
+
+        if let Some(cap) = new_cap {
+            env.storage().persistent().set(&DataKey::MaxSupply, &cap);
+        } else {
+            env.storage().persistent().remove(&DataKey::MaxSupply);
+        }
+
+        env.storage()
+            .instance()
+            .extend_ttl(LEDGER_THRESHOLD, LEDGER_BUMP);
+        env.events()
+            .publish((symbol_short!("set_max_supply"),), new_cap.unwrap_or(-1));
+        Ok(())
     }
 
     /// Checks if the contract is paused (#336)
@@ -582,15 +643,26 @@ mod test {
         assert_eq!(client.balance(&alice), 1000_i128);
     }
 
-    // #79: from == to (self-transfer) → Unauthorized; balance must not change
+    // #340: from == to (self-transfer) → Ok, balance unchanged, event emitted
     #[test]
-    fn test_transfer_self_transfer_fails() {
+    fn test_transfer_self_transfer_succeeds() {
         let (env, _admin, client) = setup();
         let alice = Address::generate(&env);
         client.mint(&alice, &1000_i128);
         let result = client.try_transfer(&alice, &alice, &100_i128);
-        assert_eq!(result, Err(Ok(TokenError::Unauthorized)));
+        assert_eq!(result, Ok(Ok(())));
         assert_eq!(client.balance(&alice), 1000_i128);
+    }
+
+    // #340: self-transfer exceeding balance still fails
+    #[test]
+    fn test_transfer_self_transfer_insufficient_balance() {
+        let (env, _admin, client) = setup();
+        let alice = Address::generate(&env);
+        client.mint(&alice, &100_i128);
+        let result = client.try_transfer(&alice, &alice, &200_i128);
+        assert_eq!(result, Err(Ok(TokenError::InsufficientBalance)));
+        assert_eq!(client.balance(&alice), 100_i128);
     }
 
     #[test]
@@ -895,9 +967,9 @@ mod test {
         assert_eq!(result, Err(Ok(TokenError::Unauthorized)));
     }
 
-    // #81: from == to (self-transfer) → Unauthorized
+    // #340: from == to (self-transfer) → Ok, consumes allowance, balance unchanged
     #[test]
-    fn test_transfer_from_self_transfer_fails() {
+    fn test_transfer_from_self_transfer_succeeds() {
         let (env, _admin, client) = setup();
         let alice = Address::generate(&env);
         let spender = Address::generate(&env);
@@ -909,9 +981,32 @@ mod test {
             &(env.ledger().sequence() + 1000),
         );
         let result = client.try_transfer_from(&spender, &alice, &alice, &100_i128);
-        assert_eq!(result, Err(Ok(TokenError::Unauthorized)));
-        // Allowance must be untouched
-        assert_eq!(client.allowance(&alice, &spender), 500_i128);
+        assert_eq!(result, Ok(Ok(())));
+        // Allowance must be consumed
+        assert_eq!(client.allowance(&alice, &spender), 400_i128);
+        // Balance must be unchanged
+        assert_eq!(client.balance(&alice), 1000_i128);
+    }
+
+    // #340: self-transfer_from exceeding balance still fails
+    #[test]
+    fn test_transfer_from_self_transfer_insufficient_balance() {
+        let (env, _admin, client) = setup();
+        let alice = Address::generate(&env);
+        let spender = Address::generate(&env);
+        client.mint(&alice, &100_i128);
+        client.approve(
+            &alice,
+            &spender,
+            &500_i128,
+            &(env.ledger().sequence() + 1000),
+        );
+        let result = client.try_transfer_from(&spender, &alice, &alice, &200_i128);
+        assert_eq!(result, Err(Ok(TokenError::InsufficientBalance)));
+        // Allowance must be consumed even though balance check failed
+        assert_eq!(client.allowance(&alice, &spender), 300_i128);
+        // Balance must be unchanged
+        assert_eq!(client.balance(&alice), 100_i128);
     }
 
     // #81: Expired allowance → AllowanceExpired
