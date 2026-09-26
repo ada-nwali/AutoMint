@@ -14,7 +14,7 @@
 //! remain readable via `get_listing(id)` even after the listing has been
 //! bought or cancelled (with `active == false`). `get_active_listings` only
 //! returns currently-active entries. Clients that need pagination should use
-//! `get_active_listings(start, limit)` together with `next_listing_id()` as a
+//! `get_active_listings(cursor, limit)` (listing-id cursor; returns the next cursor) or `next_listing_id()` as a
 //! cursor bound rather than brute-force scanning all IDs. This design mirrors
 //! AM-016's cursor guidance and is a deliberate transparency choice for a
 //! public chain; an alternative (hash of `(seller, bot_id, nonce)`) was
@@ -142,7 +142,11 @@ use automint_bot_nft::{BotNFTContractClient, BotTier};
 #[contracttype]
 pub enum DataKey {
     Listing(u64),
-    ActiveListings,
+    /// Paged listing-ID index: page `n` holds at most `LISTING_PAGE_SIZE` ids
+    /// in ascending order (persistent storage).
+    ListingPage(u32),
+    /// Number of listing pages allocated (instance storage, a single u32).
+    PageCount,
     UserListings(Address),
     UserPurchases(Address),
     NextListingId,
@@ -244,6 +248,10 @@ const ALL_TIERS: [BotTier; 5] = [
     BotTier::Diamond,
 ];
 
+/// Maximum listing ids per `ListingPage` bucket (#333).
+const LISTING_PAGE_SIZE: u32 = 100;
+/// Maximum index entries examined by one `get_listings_filtered` call.
+const MAX_FILTER_SCAN: u32 = 200;
 const LEDGER_BUMP: u32 = 120960;
 const LEDGER_THRESHOLD: u32 = 103680;
 
@@ -281,9 +289,7 @@ impl MarketplaceContract {
         env.storage().instance().set(&DataKey::Config, &config);
         env.storage().instance().set(&DataKey::Initialized, &true);
         env.storage().instance().set(&DataKey::NextListingId, &1u64);
-        env.storage()
-            .instance()
-            .set(&DataKey::ActiveListings, &Vec::<u64>::new(&env));
+        env.storage().instance().set(&DataKey::PageCount, &0u32);
         env.storage()
             .instance()
             .set(&DataKey::ListingCap, &50u32);
@@ -480,15 +486,7 @@ impl MarketplaceContract {
             LEDGER_BUMP,
         );
 
-        let mut active: Vec<u64> = env
-            .storage()
-            .instance()
-            .get(&DataKey::ActiveListings)
-            .unwrap_or_else(|| Vec::new(&env));
-        active.push_back(listing_id);
-        env.storage()
-            .instance()
-            .set(&DataKey::ActiveListings, &active);
+        Self::append_listing_id(&env, listing_id);
         Self::on_listing_added(&env, &listing);
 
         let mut user_listings: Vec<u64> = env
@@ -577,7 +575,6 @@ impl MarketplaceContract {
                 env.storage()
                     .persistent()
                     .set(&DataKey::Listing(listing_id), &listing);
-                Self::remove_active_listing(&env, listing_id);
                 Self::on_listing_removed(&env, &listing);
                 Self::clear_lock(&env);
                 return Err(MarketplaceError::ListingStale);
@@ -588,7 +585,6 @@ impl MarketplaceContract {
             env.storage()
                 .persistent()
                 .set(&DataKey::Listing(listing_id), &listing);
-            Self::remove_active_listing(&env, listing_id);
             Self::on_listing_removed(&env, &listing);
             Self::clear_lock(&env);
             return Err(MarketplaceError::ListingStale);
@@ -648,32 +644,58 @@ impl MarketplaceContract {
             return Err(MarketplaceError::BotTransferFailed);
         }
 
-        // Now handle payment transfers.
+        // Pull the full price into the marketplace first so the buyer's
+        // solvency is one atomic check, then pay out every leg from the
+        // contract. Every token call is checked: any failure aborts the whole
+        // invocation (including the bot transfer above), so a fee can never be
+        // silently skipped.
         let token_client = token::Client::new(&env, &listing.currency);
         if token_client
-            .try_transfer(&buyer, &listing.seller, &seller_amount)
+            .try_transfer(&buyer, &marketplace, &listing.price)
             .is_err()
+        {
+            Self::clear_lock(&env);
+            return Err(MarketplaceError::PaymentFailed);
+        }
+
+        // The royalty goes to the original minter; when the minter is the
+        // seller themself it stays with the seller so no funds are stranded.
+        let pay_royalty = royalty > 0 && bot.minter != listing.seller;
+        let seller_payout = if royalty > 0 && !pay_royalty {
+            match seller_amount.checked_add(royalty) {
+                Some(v) => v,
+                None => {
+                    Self::clear_lock(&env);
+                    return Err(MarketplaceError::Overflow);
+                }
+            }
+        } else {
+            seller_amount
+        };
+
+        if seller_payout > 0
+            && token_client
+                .try_transfer(&marketplace, &listing.seller, &seller_payout)
+                .is_err()
         {
             Self::clear_lock(&env);
             return Err(MarketplaceError::PaymentFailed);
         }
         if platform_fee > 0
             && token_client
-                .try_transfer(&buyer, &config.admin, &platform_fee)
+                .try_transfer(&marketplace, &config.admin, &platform_fee)
                 .is_err()
         {
             Self::clear_lock(&env);
             return Err(MarketplaceError::PaymentFailed);
         }
-
-        if royalty > 0 && bot.minter != listing.seller {
-            if token_client
-                .try_transfer(&buyer, &bot.minter, &royalty)
+        if pay_royalty
+            && token_client
+                .try_transfer(&marketplace, &bot.minter, &royalty)
                 .is_err()
-            {
-                Self::clear_lock(&env);
-                return Err(MarketplaceError::PaymentFailed);
-            }
+        {
+            Self::clear_lock(&env);
+            return Err(MarketplaceError::PaymentFailed);
         }
 
         listing.active = false;
@@ -688,7 +710,6 @@ impl MarketplaceContract {
         env.storage()
             .persistent()
             .remove(&DataKey::BotListing(listing.bot_id));
-        Self::remove_active_listing(&env, listing_id);
         if let Err(e) = Self::record_sale(&env, listing.bot_tier, listing.price) {
             Self::clear_lock(&env);
             return Err(e);
@@ -778,21 +799,8 @@ impl MarketplaceContract {
             .persistent()
             .remove(&DataKey::BotListing(listing.bot_id));
 
-        // Remove from the active listings index.
-        let active: Vec<u64> = env
-            .storage()
-            .instance()
-            .get(&DataKey::ActiveListings)
-            .unwrap_or_else(|| Vec::new(&env));
-        let mut new_active: Vec<u64> = Vec::new(&env);
-        for id in active.iter() {
-            if id != listing_id {
-                new_active.push_back(id);
-            }
-        }
-        env.storage()
-            .instance()
-            .set(&DataKey::ActiveListings, &new_active);
+        // The id stays in its ListingPage as a tombstone (`active == false`);
+        // `compact_page` reclaims the slot later.
         env.storage()
             .instance()
             .extend_ttl(LEDGER_THRESHOLD, LEDGER_BUMP);
@@ -875,34 +883,32 @@ impl MarketplaceContract {
             .ok_or(MarketplaceError::NotInitialized)?;
         config.bot_nft.require_auth();
 
-        let active: Vec<u64> = env
+        // O(1): the bot -> active listing index replaces a scan of all ids.
+        let listing_id: u64 = match env
             .storage()
-            .instance()
-            .get(&DataKey::ActiveListings)
-            .unwrap_or_else(|| Vec::new(&env));
-
-        for listing_id in active.iter() {
-            if let Some(mut listing) = env
-                .storage()
-                .persistent()
-                .get::<_, Listing>(&DataKey::Listing(listing_id))
-            {
-                if listing.bot_id == bot_id && listing.active {
-                    listing.active = false;
-                    env.storage()
-                        .persistent()
-                        .set(&DataKey::Listing(listing_id), &listing);
-                    env.storage()
-                        .persistent()
-                        .remove(&DataKey::BotListing(listing.bot_id));
-                    Self::remove_active_listing(&env, listing_id);
-                    Self::on_listing_removed(&env, &listing);
-                    Self::decrement_user_active_listing_count(&env, &listing.seller);
-                    env.events().publish(
-                        (symbol_short!("deactive"), bot_id),
-                        listing_id,
-                    );
-                }
+            .persistent()
+            .get(&DataKey::BotListing(bot_id))
+        {
+            Some(id) => id,
+            None => return Ok(()),
+        };
+        if let Some(mut listing) = env
+            .storage()
+            .persistent()
+            .get::<_, Listing>(&DataKey::Listing(listing_id))
+        {
+            if listing.bot_id == bot_id && listing.active {
+                listing.active = false;
+                env.storage()
+                    .persistent()
+                    .set(&DataKey::Listing(listing_id), &listing);
+                env.storage()
+                    .persistent()
+                    .remove(&DataKey::BotListing(listing.bot_id));
+                Self::on_listing_removed(&env, &listing);
+                Self::decrement_user_active_listing_count(&env, &listing.seller);
+                env.events()
+                    .publish((symbol_short!("deactive"), bot_id), listing_id);
             }
         }
         Ok(())
@@ -928,66 +934,41 @@ impl MarketplaceContract {
             .ok_or(MarketplaceError::ListingNotFound)
     }
 
-    /// Return up to `limit` active listings, skipping the first `start` entries
-    /// of the active-listings index, bounding the scan to `limit * 4` candidates.
+    /// Return up to `limit` active listings with id greater than `cursor`,
+    /// plus the cursor to pass to the next call (#333).
     ///
-    /// Input validation / edge-case handling (issue #120, #429):
-    /// - `limit == 0`: a request for zero items is trivially satisfied, so we
-    ///   return an empty vec immediately rather than treating it as an error.
-    /// - `start` beyond the number of active listings: the index iteration
-    ///   simply skips every entry and yields an empty vec — no panic.
-    /// - Stale index entry (an id in `ActiveListings` whose `Listing(id)` record
-    ///   was removed from persistent storage): skipped gracefully via the
-    ///   `if let Some(l)` guard.
-    /// - An id still present in the index but whose listing has `active == false`:
-    ///   filtered out by the `if l.active` check.
-    /// - High tombstone density: the scan bounds to `limit * 4` candidates
-    ///   examined to prevent O(n) cost regardless of inactive listing density.
+    /// `cursor` is a listing ID (0 = start), NOT a positional index, so it stays
+    /// valid when listings are cancelled, sold or compacted mid-pagination:
+    /// every active listing is visited exactly once. The scan examines at most
+    /// `limit * 4` index entries per call, so a page may be short when many
+    /// tombstones are skipped; keep paging until the returned cursor equals the
+    /// one passed in (nothing left to scan).
     ///
-    /// Every edge case degrades gracefully to an empty/partial result, so there
-    /// is no genuine failure condition to signal. The return type stays
-    /// `Vec<Listing>` (rather than `Result<..>`) to avoid needless API churn for
-    /// callers. Pagination: if fewer than `limit` results are returned and the
-    /// result size < `limit`, the caller has reached the end. Otherwise,
-    /// increment `start` by `limit` to continue pagination.
-    pub fn get_active_listings(env: Env, start: u64, limit: u32) -> Vec<Listing> {
+    /// - `limit == 0` returns `(empty, cursor)`.
+    /// - Inactive listings (tombstones), missing records and listings whose bot
+    ///   is no longer escrowed here are skipped.
+    pub fn get_active_listings(env: Env, cursor: u64, limit: u32) -> (Vec<Listing>, u64) {
         let mut result: Vec<Listing> = Vec::new(&env);
         if limit == 0 {
-            return result;
+            return (result, cursor);
         }
-        let active_ids: Vec<u64> = env
-            .storage()
-            .instance()
-            .get(&DataKey::ActiveListings)
-            .unwrap_or_else(|| Vec::new(&env));
+        let ids = Self::ids_after(&env, cursor, limit.saturating_mul(4));
         let marketplace = env.current_contract_address();
         let config: Option<Config> = env.storage().instance().get(&DataKey::Config);
-        let mut count: u32 = 0;
-        let max_candidates = limit.saturating_mul(4);
-        let mut candidates_examined: u32 = 0;
-        for (i, id) in active_ids.iter().enumerate() {
-            if (i as u64) < start {
-                continue;
-            }
-            if candidates_examined >= max_candidates {
+        let mut next = cursor;
+        for id in ids.iter() {
+            if result.len() >= limit {
                 break;
             }
-            candidates_examined += 1;
-            if count >= limit {
-                break;
-            }
+            next = id;
             if let Some(l) = env
                 .storage()
                 .persistent()
                 .get::<_, Listing>(&DataKey::Listing(id))
             {
                 if l.active {
-                    // Filter stale listings where marketplace no longer owns the bot.
-                    // This ensures a listing that became stale (e.g. via admin
-                    // transfer) stops appearing even though the `buy_bot` stale
-                    // path returns an error and the host reverts the
-                    // `active=false` write. See module docs for enumeration
-                    // design.
+                    // Skip stale listings where the marketplace no longer owns
+                    // the bot (e.g. admin transfer); see module docs.
                     if let Some(cfg) = config.as_ref() {
                         let bot_client = BotNFTContractClient::new(&env, &cfg.bot_nft);
                         match bot_client.try_get_bot(&l.bot_id) {
@@ -996,17 +977,56 @@ impl MarketplaceContract {
                         }
                     }
                     result.push_back(l);
-                    count += 1;
                 }
             }
         }
-        result
+        (result, next)
     }
 
-    /// Return a bounded page of active listings matching optional tier and
-    /// inclusive price constraints. `cursor` is an offset into the active
-    /// listing index; callers advance it by the number of scanned index items.
-    /// The result size is capped at 50 entries to bound contract work.
+    /// Permissionless: drop tombstoned (inactive / missing) ids from `page` so
+    /// the slot count reflects live listings. Cursors are id-based so this is
+    /// safe at any time. Returns the number of ids removed.
+    pub fn compact_page(env: Env, page: u32) -> u32 {
+        let key = DataKey::ListingPage(page);
+        let ids: Vec<u64> = match env.storage().persistent().get(&key) {
+            Some(v) => v,
+            None => return 0,
+        };
+        let mut kept: Vec<u64> = Vec::new(&env);
+        for id in ids.iter() {
+            let live = env
+                .storage()
+                .persistent()
+                .get::<_, Listing>(&DataKey::Listing(id))
+                .map(|l| l.active)
+                .unwrap_or(false);
+            if live {
+                kept.push_back(id);
+            }
+        }
+        let removed = ids.len() - kept.len();
+        if removed > 0 {
+            env.storage().persistent().set(&key, &kept);
+            env.storage()
+                .persistent()
+                .extend_ttl(&key, LEDGER_THRESHOLD, LEDGER_BUMP);
+        }
+        removed
+    }
+
+    /// Number of listing pages allocated.
+    pub fn listing_page_count(env: Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&DataKey::PageCount)
+            .unwrap_or(0)
+    }
+
+    /// Bounded page of active listings matching optional tier and inclusive
+    /// price constraints. `cursor` is a listing ID (0 = start), as in
+    /// `get_active_listings`; at most `MAX_FILTER_SCAN` index entries are
+    /// examined and at most 50 listings returned. Returns the next cursor;
+    /// stop when it equals the cursor passed in.
     pub fn get_listings_filtered(
         env: Env,
         tier: Option<BotTier>,
@@ -1014,29 +1034,23 @@ impl MarketplaceContract {
         max_price: Option<i128>,
         cursor: u64,
         limit: u32,
-    ) -> Vec<Listing> {
+    ) -> (Vec<Listing>, u64) {
         let mut result: Vec<Listing> = Vec::new(&env);
         let bounded_limit = limit.min(50);
         if bounded_limit == 0 {
-            return result;
+            return (result, cursor);
         }
 
-        let active_ids: Vec<u64> = env
-            .storage()
-            .instance()
-            .get(&DataKey::ActiveListings)
-            .unwrap_or_else(|| Vec::new(&env));
+        let ids = Self::ids_after(&env, cursor, MAX_FILTER_SCAN);
         let marketplace = env.current_contract_address();
         let config: Option<Config> = env.storage().instance().get(&DataKey::Config);
+        let mut next = cursor;
 
-        for (index, id) in active_ids.iter().enumerate() {
-            if (index as u64) < cursor {
-                continue;
-            }
+        for id in ids.iter() {
             if result.len() >= bounded_limit {
                 break;
             }
-
+            next = id;
             let Some(listing) = env
                 .storage()
                 .persistent()
@@ -1071,7 +1085,7 @@ impl MarketplaceContract {
             }
             result.push_back(listing);
         }
-        result
+        (result, next)
     }
     pub fn get_user_listings(env: Env, seller: Address) -> Vec<Listing> {
         let ids: Vec<u64> = env
@@ -1413,11 +1427,7 @@ impl MarketplaceContract {
     /// Lowest price and listing id among active listings of `tier`, or
     /// `(0, 0)` when there are none.
     fn scan_floor(env: &Env, tier: BotTier) -> (i128, u64) {
-        let active: Vec<u64> = env
-            .storage()
-            .instance()
-            .get(&DataKey::ActiveListings)
-            .unwrap_or_else(|| Vec::new(env));
+        let active: Vec<u64> = Self::ids_after(env, 0, u32::MAX);
         let mut best: (i128, u64) = (0, 0);
         for id in active.iter() {
             if let Some(l) = env
@@ -1433,24 +1443,70 @@ impl MarketplaceContract {
         best
     }
 
-    fn remove_active_listing(env: &Env, listing_id: u64) {
-        let active: Vec<u64> = env
+    /// Append `listing_id` to the last page, opening a new page when full.
+    /// Touches one bounded persistent entry regardless of total listings.
+    fn append_listing_id(env: &Env, listing_id: u64) {
+        let count: u32 = env
             .storage()
             .instance()
-            .get(&DataKey::ActiveListings)
-            .unwrap_or_else(|| Vec::new(env));
-        let mut new_active: Vec<u64> = Vec::new(env);
-        for id in active.iter() {
-            if id != listing_id {
-                new_active.push_back(id);
+            .get(&DataKey::PageCount)
+            .unwrap_or(0);
+        let mut page_no = count.saturating_sub(1);
+        let mut page: Vec<u64> = if count == 0 {
+            Vec::new(env)
+        } else {
+            env.storage()
+                .persistent()
+                .get(&DataKey::ListingPage(page_no))
+                .unwrap_or_else(|| Vec::new(env))
+        };
+        if count == 0 || page.len() >= LISTING_PAGE_SIZE {
+            page_no = count;
+            page = Vec::new(env);
+            env.storage()
+                .instance()
+                .set(&DataKey::PageCount, &(count + 1));
+        }
+        page.push_back(listing_id);
+        let key = DataKey::ListingPage(page_no);
+        env.storage().persistent().set(&key, &page);
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, LEDGER_THRESHOLD, LEDGER_BUMP);
+    }
+
+    /// Up to `max` indexed listing ids strictly greater than `cursor`, in
+    /// ascending id order. Ids are appended monotonically, so pages are sorted
+    /// and an id cursor stays valid across removals and compaction.
+    fn ids_after(env: &Env, cursor: u64, max: u32) -> Vec<u64> {
+        let mut out: Vec<u64> = Vec::new(env);
+        let count: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::PageCount)
+            .unwrap_or(0);
+        let mut p = 0u32;
+        while p < count {
+            let page: Vec<u64> = env
+                .storage()
+                .persistent()
+                .get(&DataKey::ListingPage(p))
+                .unwrap_or_else(|| Vec::new(env));
+            p += 1;
+            match page.last() {
+                Some(last) if last > cursor => {}
+                _ => continue,
+            }
+            for id in page.iter() {
+                if id > cursor {
+                    out.push_back(id);
+                    if out.len() >= max {
+                        return out;
+                    }
+                }
             }
         }
-        env.storage()
-            .instance()
-            .set(&DataKey::ActiveListings, &new_active);
-        env.storage()
-            .instance()
-            .extend_ttl(LEDGER_THRESHOLD, LEDGER_BUMP);
+        out
     }
 
     fn add_user_purchase(env: &Env, buyer: &Address, purchase: Purchase) {
