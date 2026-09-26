@@ -143,6 +143,8 @@ const LEDGER_BUMP: u32 = 120960;
 const LEDGER_THRESHOLD: u32 = 103680;
 /// Maximum number of bots that may be minted per tier (supply cap).
 const MAX_TIER_SUPPLY: u64 = 50;
+/// Maximum number of free Basic bots a single account may mint.
+const MAX_BASIC_BOTS_PER_ACCOUNT: u64 = 1;
 /// Maximum number of recipients in a single admin_mint_batch call.
 const MAX_BATCH_SIZE: u64 = 50;
 /// Maximum number of bots returned per page when querying by tier (#398).
@@ -242,6 +244,22 @@ impl BotNFTContract {
             return Err(BotNFTError::NotInitialized);
         }
         owner.require_auth();
+
+        // Enforce per-account limit on free Basic bots
+        let user_bots = Self::get_user_bots(env.clone(), owner.clone());
+        let basic_count = user_bots
+            .iter()
+            .filter(|bot_id| {
+                Self::get_bot(env.clone(), *bot_id)
+                    .map(|bot| bot.tier == BotTier::Basic)
+                    .unwrap_or(false)
+            })
+            .count();
+
+        if basic_count as u64 >= MAX_BASIC_BOTS_PER_ACCOUNT {
+            return Err(BotNFTError::SupplyCapExceeded);
+        }
+
         Self::do_mint(&env, &owner, BotTier::Basic, false)
     }
 

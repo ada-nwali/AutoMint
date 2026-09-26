@@ -313,11 +313,7 @@ impl MarketplaceContract {
             .storage()
             .instance()
             .get(&DataKey::Config)
-            .unwrap_or(Config {
-                admin: currency.clone(),
-                bot_nft: currency.clone(),
-                fee_bps: 250,
-            });
+            .expect("Marketplace not initialized");
         Self::min_price_for_currency(&env, &currency, config.fee_bps)
     }
 
