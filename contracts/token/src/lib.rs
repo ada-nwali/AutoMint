@@ -155,7 +155,15 @@ impl AMTToken {
         }
 
         if from == to {
-            return Err(TokenError::Unauthorized);
+            let balance = Self::balance(env.clone(), from.clone());
+            if balance < amount {
+                return Err(TokenError::InsufficientBalance);
+            }
+            env.events().publish(
+                (symbol_short!("transfer"), from.clone(), to.clone()),
+                amount,
+            );
+            return Ok(());
         }
 
         Self::do_transfer(&env, &from, &to, amount)
@@ -186,12 +194,21 @@ impl AMTToken {
             return Err(TokenError::Unauthorized);
         }
 
-        // Sending to yourself is always a no-op: reject it to avoid pointless state writes
+        Self::spend_allowance(&env, &from, &spender, amount)?;
+
+        // Self-transfer is a no-op but still consumes allowance (checked above)
         if from == to {
-            return Err(TokenError::Unauthorized);
+            let balance = Self::balance(env.clone(), from.clone());
+            if balance < amount {
+                return Err(TokenError::InsufficientBalance);
+            }
+            env.events().publish(
+                (symbol_short!("transfer"), from.clone(), to.clone()),
+                amount,
+            );
+            return Ok(());
         }
 
-        Self::spend_allowance(&env, &from, &spender, amount)?;
         Self::do_transfer(&env, &from, &to, amount)
     }
 
@@ -582,15 +599,26 @@ mod test {
         assert_eq!(client.balance(&alice), 1000_i128);
     }
 
-    // #79: from == to (self-transfer) → Unauthorized; balance must not change
+    // #340: from == to (self-transfer) → Ok, balance unchanged, event emitted
     #[test]
-    fn test_transfer_self_transfer_fails() {
+    fn test_transfer_self_transfer_succeeds() {
         let (env, _admin, client) = setup();
         let alice = Address::generate(&env);
         client.mint(&alice, &1000_i128);
         let result = client.try_transfer(&alice, &alice, &100_i128);
-        assert_eq!(result, Err(Ok(TokenError::Unauthorized)));
+        assert_eq!(result, Ok(Ok(())));
         assert_eq!(client.balance(&alice), 1000_i128);
+    }
+
+    // #340: self-transfer exceeding balance still fails
+    #[test]
+    fn test_transfer_self_transfer_insufficient_balance() {
+        let (env, _admin, client) = setup();
+        let alice = Address::generate(&env);
+        client.mint(&alice, &100_i128);
+        let result = client.try_transfer(&alice, &alice, &200_i128);
+        assert_eq!(result, Err(Ok(TokenError::InsufficientBalance)));
+        assert_eq!(client.balance(&alice), 100_i128);
     }
 
     #[test]
@@ -895,9 +923,9 @@ mod test {
         assert_eq!(result, Err(Ok(TokenError::Unauthorized)));
     }
 
-    // #81: from == to (self-transfer) → Unauthorized
+    // #340: from == to (self-transfer) → Ok, consumes allowance, balance unchanged
     #[test]
-    fn test_transfer_from_self_transfer_fails() {
+    fn test_transfer_from_self_transfer_succeeds() {
         let (env, _admin, client) = setup();
         let alice = Address::generate(&env);
         let spender = Address::generate(&env);
@@ -909,9 +937,32 @@ mod test {
             &(env.ledger().sequence() + 1000),
         );
         let result = client.try_transfer_from(&spender, &alice, &alice, &100_i128);
-        assert_eq!(result, Err(Ok(TokenError::Unauthorized)));
-        // Allowance must be untouched
-        assert_eq!(client.allowance(&alice, &spender), 500_i128);
+        assert_eq!(result, Ok(Ok(())));
+        // Allowance must be consumed
+        assert_eq!(client.allowance(&alice, &spender), 400_i128);
+        // Balance must be unchanged
+        assert_eq!(client.balance(&alice), 1000_i128);
+    }
+
+    // #340: self-transfer_from exceeding balance still fails
+    #[test]
+    fn test_transfer_from_self_transfer_insufficient_balance() {
+        let (env, _admin, client) = setup();
+        let alice = Address::generate(&env);
+        let spender = Address::generate(&env);
+        client.mint(&alice, &100_i128);
+        client.approve(
+            &alice,
+            &spender,
+            &500_i128,
+            &(env.ledger().sequence() + 1000),
+        );
+        let result = client.try_transfer_from(&spender, &alice, &alice, &200_i128);
+        assert_eq!(result, Err(Ok(TokenError::InsufficientBalance)));
+        // Allowance must be consumed even though balance check failed
+        assert_eq!(client.allowance(&alice, &spender), 300_i128);
+        // Balance must be unchanged
+        assert_eq!(client.balance(&alice), 100_i128);
     }
 
     // #81: Expired allowance → AllowanceExpired
