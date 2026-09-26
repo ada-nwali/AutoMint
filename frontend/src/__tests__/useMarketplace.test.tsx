@@ -176,8 +176,8 @@ describe('useMarketplace Hooks', () => {
 
     it('should successfully fetch active listings', async () => {
       const mockListings: MarketplaceListing[] = [
-        { id: 1n, seller: 'SELLER1', bot_id: 1n, price: 100n, listed_at: 1n },
-        { id: 2n, seller: 'SELLER2', bot_id: 2n, price: 200n, listed_at: 2n },
+        { id: 1n, seller: 'SELLER1', bot_id: 1n, bot_tier: 'Basic', price: 100n, currency: 'CCUR', listed_at: 1n, active: true },
+        { id: 2n, seller: 'SELLER2', bot_id: 2n, bot_tier: 'Gold', price: 200n, currency: 'CCUR', listed_at: 2n, active: true },
       ];
 
       mockGetActiveListings.mockResolvedValue(mockListings);
@@ -204,7 +204,7 @@ describe('useMarketplace Hooks', () => {
   describe('useMyListings', () => {
     it('should fetch user listings when wallet connected', async () => {
       const mockListings: MarketplaceListing[] = [
-        { id: 1n, seller: mockPublicKey, bot_id: 1n, price: 100n, listed_at: 1n },
+        { id: 1n, seller: mockPublicKey, bot_id: 1n, bot_tier: 'Basic', price: 100n, currency: 'CCUR', listed_at: 1n, active: true },
       ];
 
       mockGetUserListings.mockResolvedValue(mockListings);

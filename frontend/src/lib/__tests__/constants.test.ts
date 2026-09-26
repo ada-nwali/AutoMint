@@ -30,7 +30,6 @@ describe("constants.ts", () => {
       delete process.env.NEXT_PUBLIC_TOKEN_CONTRACT_ID;
       delete process.env.NEXT_PUBLIC_TX_TIMEOUT;
       delete process.env.NEXT_PUBLIC_BASE_FEE;
-      delete process.env.NEXT_PUBLIC_POINTS_PER_AMT;
       delete process.env.NEXT_PUBLIC_LEADERBOARD_LIMIT;
       delete process.env.NEXT_PUBLIC_POLL_INTERVAL_MS;
       delete process.env.NEXT_PUBLIC_COUNTER_TICK_MS;
@@ -78,7 +77,6 @@ describe("constants.ts", () => {
       const constants = require("../constants");
       expect(constants.TX_TIMEOUT).toBe(30);
       expect(constants.BASE_FEE).toBe("100");
-      expect(constants.POINTS_PER_AMT).toBe(1000);
       expect(constants.LEADERBOARD_LIMIT).toBe(50);
       expect(constants.POLL_INTERVAL_MS).toBe(1000);
       expect(constants.COUNTER_TICK_MS).toBe(1000);
@@ -98,7 +96,6 @@ describe("constants.ts", () => {
       process.env.NEXT_PUBLIC_TOKEN_CONTRACT_ID = "CATOKEN1234567890";
       process.env.NEXT_PUBLIC_TX_TIMEOUT = "60";
       process.env.NEXT_PUBLIC_BASE_FEE = "200";
-      process.env.NEXT_PUBLIC_POINTS_PER_AMT = "500";
       process.env.NEXT_PUBLIC_LEADERBOARD_LIMIT = "100";
       process.env.NEXT_PUBLIC_POLL_INTERVAL_MS = "2500";
       process.env.NEXT_PUBLIC_COUNTER_TICK_MS = "500";
@@ -170,7 +167,6 @@ describe("constants.ts", () => {
       const constants = require("../constants");
       expect(constants.TX_TIMEOUT).toBe(60);
       expect(constants.BASE_FEE).toBe("200");
-      expect(constants.POINTS_PER_AMT).toBe(500);
       expect(constants.LEADERBOARD_LIMIT).toBe(100);
       expect(constants.POLL_INTERVAL_MS).toBe(2500);
       expect(constants.COUNTER_TICK_MS).toBe(500);
@@ -178,14 +174,12 @@ describe("constants.ts", () => {
 
     it("handles invalid or non-numeric environment values by falling back", () => {
       process.env.NEXT_PUBLIC_TX_TIMEOUT = "invalid-timeout";
-      process.env.NEXT_PUBLIC_POINTS_PER_AMT = "not-a-number";
       process.env.NEXT_PUBLIC_LEADERBOARD_LIMIT = "";
       process.env.NEXT_PUBLIC_POLL_INTERVAL_MS = "abc";
       process.env.NEXT_PUBLIC_COUNTER_TICK_MS = "0"; // 0 is falsy, falls back to 1000
 
       const constants = require("../constants");
       expect(constants.TX_TIMEOUT).toBe(30);
-      expect(constants.POINTS_PER_AMT).toBe(1000);
       expect(constants.LEADERBOARD_LIMIT).toBe(50);
       expect(constants.POLL_INTERVAL_MS).toBe(1000);
       expect(constants.COUNTER_TICK_MS).toBe(1000);

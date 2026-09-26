@@ -359,15 +359,27 @@ describe("getActiveListings", () => {
     id: 1n,
     seller: "GSELLER",
     bot_id: 10n,
+    bot_tier: "Gold",
     price: 500n,
+    currency: "CCURRENCY",
     listed_at: 1_700_000_000n,
+    active: true,
   };
 
   it("maps an array of raw listings", async () => {
     mockSimulate.mockResolvedValue([rawListing]);
     const listings = await getActiveListings(0, 100, "GSRC");
     expect(listings).toEqual([
-      { id: 1n, seller: "GSELLER", bot_id: 10n, price: 500n, listed_at: 1_700_000_000n },
+      {
+        id: 1n,
+        seller: "GSELLER",
+        bot_id: 10n,
+        bot_tier: "Gold",
+        price: 500n,
+        currency: "CCURRENCY",
+        listed_at: 1_700_000_000n,
+        active: true,
+      },
     ]);
   });
 
@@ -397,15 +409,27 @@ describe("getUserListings", () => {
     id: 2n,
     seller: "GUSER",
     bot_id: 20n,
+    bot_tier: "Silver",
     price: 1000n,
+    currency: "CCURRENCY",
     listed_at: 1_700_000_001n,
+    active: true,
   };
 
   it("maps an array of raw listings for the user", async () => {
     mockSimulate.mockResolvedValue([rawListing]);
     const listings = await getUserListings("GUSER");
     expect(listings).toEqual([
-      { id: 2n, seller: "GUSER", bot_id: 20n, price: 1000n, listed_at: 1_700_000_001n },
+      {
+        id: 2n,
+        seller: "GUSER",
+        bot_id: 20n,
+        bot_tier: "Silver",
+        price: 1000n,
+        currency: "CCURRENCY",
+        listed_at: 1_700_000_001n,
+        active: true,
+      },
     ]);
   });
 
@@ -967,8 +991,11 @@ describe("parse helpers in contracts.ts", () => {
         id: "1",
         seller: "GABC1234567890",
         bot_id: 42,
+        bot_tier: "Diamond",
         price: "1000000000",
+        currency: "CCURRENCY1234567890",
         listed_at: 1700000000n,
+        active: true,
       };
 
       const result = parseListing(rawData);
@@ -977,14 +1004,47 @@ describe("parse helpers in contracts.ts", () => {
         id: 1n,
         seller: "GABC1234567890",
         bot_id: 42n,
+        bot_tier: "Diamond",
         price: 1000000000n,
+        currency: "CCURRENCY1234567890",
         listed_at: 1700000000n,
+        active: true,
       });
     });
 
     it("throws naming the field when a required field is missing (#484)", () => {
       expect(() => parseListing({})).toThrow(/"id"/);
       expect(() => parseListing({ id: 1n })).toThrow(/"bot_id"/);
+    });
+
+    it("accepts the one-element-array enum shape for bot_tier, same as parseBotNFT (#476)", () => {
+      const result = parseListing({
+        id: 1n,
+        seller: "GABC",
+        bot_id: 1n,
+        bot_tier: ["Bronze"],
+        price: 1n,
+        currency: "CCURRENCY",
+        listed_at: 1n,
+        active: false,
+      });
+      expect(result.bot_tier).toBe("Bronze");
+      expect(result.active).toBe(false);
+    });
+
+    it("throws on an unrecognized bot_tier rather than silently defaulting (#476)", () => {
+      expect(() =>
+        parseListing({
+          id: 1n,
+          seller: "GABC",
+          bot_id: 1n,
+          bot_tier: "Legendary",
+          price: 1n,
+          currency: "CCURRENCY",
+          listed_at: 1n,
+          active: true,
+        })
+      ).toThrow(/unrecognized tier/);
     });
   });
 });

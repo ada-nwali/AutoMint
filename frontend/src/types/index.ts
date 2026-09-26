@@ -40,8 +40,11 @@ export interface MarketplaceListing {
   id: bigint;
   seller: string;
   bot_id: bigint;
+  bot_tier: BotTier;
   price: bigint;
+  currency: string;
   listed_at: bigint;
+  active: boolean;
 }
 
 export type Listing = MarketplaceListing;

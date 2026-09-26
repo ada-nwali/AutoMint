@@ -15,6 +15,7 @@ import {
   getUserProfile,
   getUserBots,
   getAccrualState,
+  getAccrualConfig,
   getAmtBalance,
   getUserTotalRate,
 } from '@/lib/contracts';
@@ -39,6 +40,7 @@ const mockIsRegistered = isRegistered as jest.MockedFunction<typeof isRegistered
 const mockGetUserProfile = getUserProfile as jest.MockedFunction<typeof getUserProfile>;
 const mockGetUserBots = getUserBots as jest.MockedFunction<typeof getUserBots>;
 const mockGetAccrualState = getAccrualState as jest.MockedFunction<typeof getAccrualState>;
+const mockGetAccrualConfig = getAccrualConfig as jest.MockedFunction<typeof getAccrualConfig>;
 const mockGetAmtBalance = getAmtBalance as jest.MockedFunction<typeof getAmtBalance>;
 const mockGetUserTotalRate = getUserTotalRate as jest.MockedFunction<typeof getUserTotalRate>;
 const mockExecuteTransaction = executeTransaction as jest.MockedFunction<
@@ -472,6 +474,8 @@ describe('useAnimatedPoints (#491, #490)', () => {
     );
     // A single Basic bot unless a test says otherwise.
     mockGetUserTotalRate.mockResolvedValue(1n);
+    // The on-chain conversion threshold (#477) — 100 unless a test overrides it.
+    mockGetAccrualConfig.mockResolvedValue({ pointsPerAmt: 100 });
   });
   afterEach(() => jest.useRealTimers());
 
@@ -499,6 +503,39 @@ describe('useAnimatedPoints (#491, #490)', () => {
     // The carry is surfaced separately as "progress to next AMT" — it is NOT
     // folded into the headline, which is the bug (#491).
     expect(result.current.progressToNext).toBe(42n);
+  });
+
+  it('derives progressToNextRatio from the fetched accrual config, not a hardcoded threshold (#477)', async () => {
+    mockGetAccrualConfig.mockResolvedValue({ pointsPerAmt: 200 });
+    mockGetUserProfile.mockResolvedValue({ username: 'u', points: 0n });
+    mockGetAccrualState.mockResolvedValue({
+      last_claim_ts: BigInt(Math.floor(Date.now() / 1000)),
+      carry_points: 50n,
+      lifetime_points: 0n,
+    });
+
+    const { result } = renderHook(() => useAnimatedPoints(), { wrapper: wrap });
+
+    await waitFor(() => expect(result.current.pointsPerAmt).toBe(200));
+    // 50 / 200 — if this were still derived from the old hardcoded 1000
+    // default, it would read 0.05 instead of 0.25.
+    expect(result.current.progressToNextRatio).toBeCloseTo(0.25);
+    expect(mockGetAccrualConfig).toHaveBeenCalled();
+  });
+
+  it('leaves progressToNextRatio undefined until the accrual config query resolves', async () => {
+    mockGetAccrualConfig.mockReturnValue(new Promise(() => {})); // never resolves
+    mockGetUserProfile.mockResolvedValue({ username: 'u', points: 0n });
+    mockGetAccrualState.mockResolvedValue({
+      last_claim_ts: BigInt(Math.floor(Date.now() / 1000)),
+      carry_points: 50n,
+      lifetime_points: 0n,
+    });
+
+    const { result } = renderHook(() => useAnimatedPoints(), { wrapper: wrap });
+
+    expect(result.current.pointsPerAmt).toBeUndefined();
+    expect(result.current.progressToNextRatio).toBeUndefined();
   });
 
   it('never renders a total below the registry lifetime points across a claim', async () => {
