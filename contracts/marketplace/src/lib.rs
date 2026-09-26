@@ -720,6 +720,76 @@ impl MarketplaceContract {
         result
     }
 
+    /// Return a bounded page of active listings matching optional tier and
+    /// inclusive price constraints. `cursor` is an offset into the active
+    /// listing index; callers advance it by the number of scanned index items.
+    /// The result size is capped at 50 entries to bound contract work.
+    pub fn get_listings_filtered(
+        env: Env,
+        tier: Option<BotTier>,
+        min_price: Option<i128>,
+        max_price: Option<i128>,
+        cursor: u64,
+        limit: u32,
+    ) -> Vec<Listing> {
+        let mut result: Vec<Listing> = Vec::new(&env);
+        let bounded_limit = limit.min(50);
+        if bounded_limit == 0 {
+            return result;
+        }
+
+        let active_ids: Vec<u64> = env
+            .storage()
+            .instance()
+            .get(&DataKey::ActiveListings)
+            .unwrap_or_else(|| Vec::new(&env));
+        let marketplace = env.current_contract_address();
+        let config: Option<Config> = env.storage().instance().get(&DataKey::Config);
+
+        for (index, id) in active_ids.iter().enumerate() {
+            if (index as u64) < cursor {
+                continue;
+            }
+            if result.len() >= bounded_limit {
+                break;
+            }
+
+            let Some(listing) = env
+                .storage()
+                .persistent()
+                .get::<_, Listing>(&DataKey::Listing(id))
+            else {
+                continue;
+            };
+            if !listing.active {
+                continue;
+            }
+            if let Some(expected_tier) = tier {
+                if listing.bot_tier != expected_tier {
+                    continue;
+                }
+            }
+            if let Some(minimum) = min_price {
+                if listing.price < minimum {
+                    continue;
+                }
+            }
+            if let Some(maximum) = max_price {
+                if listing.price > maximum {
+                    continue;
+                }
+            }
+            if let Some(cfg) = config.as_ref() {
+                let bot_client = BotNFTContractClient::new(&env, &cfg.bot_nft);
+                match bot_client.try_get_bot(&listing.bot_id) {
+                    Ok(Ok(bot)) if bot.owner == marketplace => {}
+                    _ => continue,
+                }
+            }
+            result.push_back(listing);
+        }
+        result
+    }
     pub fn get_user_listings(env: Env, seller: Address) -> Vec<Listing> {
         let ids: Vec<u64> = env
             .storage()
