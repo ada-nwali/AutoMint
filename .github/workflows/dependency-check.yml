@@ -1,0 +1,46 @@
+name: Dependency Check
+
+# Runs `cargo update --dry-run` (and the pinned-toolchain build) so that
+# dependency version bumps surface as a reviewable diff on every PR instead of
+# happening silently. This complements (does not replace) the exact
+# `soroban-sdk` pin enforced in Cargo.toml — see docs/DEPENDENCIES.md.
+
+on:
+  pull_request:
+    branches: [testnet-implementation, main]
+  push:
+    branches: [testnet-implementation, main]
+  workflow_dispatch:
+
+jobs:
+  dependency-drift:
+    name: Review dependency bumps (dry-run)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Must match rust-toolchain.toml (issue #559): the pinned rustc is what
+      # the recorded wasm_hash values were built with. Using `stable` here
+      # would install the wasm target for the wrong toolchain.
+      - uses: dtolnay/rust-toolchain@1.95.0
+        with:
+          components: rustfmt, clippy
+          targets: wasm32-unknown-unknown
+      - name: Show what `cargo update` would change
+        id: update
+        run: |
+          # `--dry-run` prints the pending bumps WITHOUT modifying Cargo.lock.
+          # Soroban SDK is pinned to an exact version, so it never appears here
+          # unless the pin itself is deliberately bumped.
+          set +e
+          dry="$(cargo update --dry-run 2>&1)"
+          echo "$dry"
+          echo "$dry" > /tmp/cargo-update-dry-run.txt
+      - name: Upload dry-run diff
+        uses: actions/upload-artifact@v4
+        with:
+          name: cargo-update-dry-run
+          path: /tmp/cargo-update-dry-run.txt
+      - name: Build contracts with pinned toolchain
+        run: |
+          # Exercises rust-toolchain.toml + the exact SDK pin together.
+          cargo build -p automint-registry --target wasm32-unknown-unknown --release

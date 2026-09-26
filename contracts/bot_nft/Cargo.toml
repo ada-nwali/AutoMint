@@ -15,7 +15,7 @@ soroban-sdk = { workspace = true }
 automint-registry = { path = "../registry" }
 
 [dev-dependencies]
-soroban-sdk = { version = "21", features = ["testutils"] }
+soroban-sdk = { version = "=21.7.7", features = ["testutils"] }
 automint-registry = { path = "../registry", features = ["testutils"] }
 automint-token = { path = "../token", features = ["testutils"] }
 automint-testutils = { path = "../testutils" }

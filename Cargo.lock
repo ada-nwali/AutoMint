@@ -66,6 +66,7 @@ dependencies = [
 name = "automint-marketplace"
 version = "0.1.0"
 dependencies = [
+ "automint-accrual",
  "automint-bot-nft",
  "automint-registry",
  "automint-testutils",

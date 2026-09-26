@@ -1,4 +1,7 @@
 import { Github, ExternalLink } from "lucide-react";
+import { NETWORK } from "@/lib/constants";
+
+const REPO_URL = "https://github.com/Ada-Girly881/AutoMint";
 
 const footerLinks = {
   product: [
@@ -7,14 +10,23 @@ const footerLinks = {
     { label: "Leaderboard", href: "/leaderboard" },
   ],
   resources: [
-    { label: "Documentation", href: "https://soroban.stellar.org", external: true },
-    { label: "Stellar Network", href: "https://stellar.org", external: true },
+    { label: "Project Docs", href: `${REPO_URL}/tree/testnet-implementation/docs`, external: true },
+    { label: "Deployment Guide", href: `${REPO_URL}/blob/testnet-implementation/docs/DEPLOYMENT.md`, external: true },
+    { label: "Stellar Testnet Explorer", href: "https://stellar.expert/explorer/testnet", external: true },
     { label: "Soroban Docs", href: "https://soroban.stellar.org/docs", external: true },
-    { label: "License (Apache-2.0)", href: "https://github.com/Alaka-ibr/AutoMint/blob/main/LICENSE", external: true },
+    {
+      label: "License (Apache-2.0)",
+      href: `${REPO_URL}/blob/testnet-implementation/LICENSE`,
+      external: true,
+    },
   ],
   community: [
-    { label: "GitHub", href: "https://github.com/Ada-Girly881/AutoMint", external: true, icon: Github },
-    { label: "Discord", href: "#", external: true },
+    {
+      label: "GitHub",
+      href: REPO_URL,
+      external: true,
+      icon: Github,
+    },
   ],
 };
 
@@ -27,9 +39,7 @@ function FooterLinkGroup({
 }) {
   return (
     <nav aria-label={title} className="flex flex-col gap-2.5">
-      <h3 className="text-xs font-semibold uppercase tracking-wider text-muted">
-        {title}
-      </h3>
+      <h3 className="text-xs font-semibold uppercase tracking-wider text-muted">{title}</h3>
       <ul className="flex flex-col gap-1.5">
         {links.map((link) => (
           <li key={link.label}>
@@ -94,7 +104,11 @@ export default function Footer() {
             >
               Soroban
             </a>
-            <span className="mx-1 text-muted" aria-hidden="true">&middot;</span>
+            <span className="mx-1 text-muted" aria-hidden="true">
+              &middot;
+            </span>
+            <span>Network: {NETWORK}</span>
+            <span aria-hidden="true">+</span>
             <span>React</span>
             <span aria-hidden="true">+</span>
             <span>Next.js</span>

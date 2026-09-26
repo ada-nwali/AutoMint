@@ -4,6 +4,8 @@ import Link from "next/link";
 import { motion } from "framer-motion";
 import { Bot, TrendingUp, Shield, Zap, ArrowRight, Users, Activity, Star } from "lucide-react";
 import { TIER_META, type BotTier } from "@/types";
+import { useTiers } from "@/hooks/useTiers";
+import { stroopsToXlmString } from "@/lib/format";
 
 const tiers: BotTier[] = ["Basic", "Bronze", "Silver", "Gold", "Diamond"];
 
@@ -61,6 +63,10 @@ const features = [
 ];
 
 export default function HomePage() {
+  // Rates and prices come from the bot_nft contract (#478); only colour and
+  // emoji are client-side.
+  const { data: tierInfo } = useTiers();
+
   return (
     <div className="flex flex-col">
       {/* Hero */}
@@ -139,6 +145,7 @@ export default function HomePage() {
           <div className="mt-12 grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
             {tiers.map((tier) => {
               const meta = TIER_META[tier];
+              const info = tierInfo?.[tier];
               return (
                 <div
                   key={tier}
@@ -149,10 +156,14 @@ export default function HomePage() {
                     {tier}
                   </h3>
                   <p className="text-sm text-muted">
-                    {meta.rate}x accrual rate
+                    {info ? `${info.rate}x` : "—"} accrual rate
                   </p>
                   <p className="font-display text-xl font-bold text-text">
-                    {meta.price === 0 ? "Free" : `${meta.price} XLM`}
+                    {!info
+                      ? "—"
+                      : info.price === 0n
+                        ? "Free"
+                        : `${stroopsToXlmString(info.price)} XLM`}
                   </p>
                 </div>
               );

@@ -1,47 +1,30 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Menu, X, Wallet, LogOut, AlertTriangle } from "lucide-react";
+import { Menu, X, Wallet, LogOut, AlertTriangle, Loader2, Download, Copy } from "lucide-react";
 import clsx from "clsx";
 import { useWallet } from "@/hooks/useWallet";
+import { useFocusLock } from "@/hooks/useFocusLock";
+import { truncateAddress, fullAddressTitle, fullAddressAriaLabel, useCopyToClipboard } from "@/lib/truncateAddress";
 
 const navLinks = [
   { label: "Dashboard", href: "/dashboard" },
   { label: "Marketplace", href: "/marketplace" },
   { label: "Leaderboard", href: "/leaderboard" },
-];
-
-function truncateAddress(address: string): string {
-  if (address.length <= 10) return address;
-  return `${address.slice(0, 6)}...${address.slice(-4)}`;
-}
+]
 
 export default function Header() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const pathname = usePathname();
-  const { publicKey, isConnected, networkMismatch, connect, disconnect } = useWallet();
+  const { publicKey, isConnected, networkMismatch, isConnecting, isNotInstalled, connect, disconnect } = useWallet();
+  const mobileMenuRef = useRef<HTMLDivElement>(null);
+  // Hook must run at the top level — calling it inside the copy button's
+  // onClick was a rules-of-hooks violation that crashed on click.
+  const { isCopied, handleCopy } = useCopyToClipboard(publicKey ?? "");
 
-  // Close mobile menu on Escape
-  const handleKeyDown = useCallback(
-    (e: KeyboardEvent) => {
-      if (e.key === "Escape") setMobileOpen(false);
-    },
-    [],
-  );
-
-  useEffect(() => {
-    if (mobileOpen) {
-      document.addEventListener("keydown", handleKeyDown);
-      // Prevent body scroll when mobile menu is open
-      document.body.style.overflow = "hidden";
-    }
-    return () => {
-      document.removeEventListener("keydown", handleKeyDown);
-      document.body.style.overflow = "";
-    };
-  }, [mobileOpen, handleKeyDown]);
+  useFocusLock(mobileMenuRef, () => setMobileOpen(false));
 
   // Close mobile menu on route change
   useEffect(() => {
@@ -56,6 +39,43 @@ export default function Header() {
         ? "bg-card-2 text-text"
         : "text-muted hover:bg-card-2 hover:text-text",
     );
+
+  // Determine the wallet button label and state (#532)
+  const getWalletButtonConfig = () => {
+    if (isConnecting) {
+      return {
+        label: "Connecting...",
+        icon: Loader2,
+        disabled: true,
+        ariaLabel: "Connecting wallet, please wait",
+      };
+    }
+    if (isNotInstalled) {
+      return {
+        label: "Install Freighter",
+        icon: Download,
+        disabled: false,
+        ariaLabel: "Install Freighter wallet",
+      };
+    }
+    if (networkMismatch) {
+      return {
+        label: "Wrong Network",
+        icon: AlertTriangle,
+        disabled: false,
+        ariaLabel: "Wallet connected to wrong network, switch to Testnet",
+      };
+    }
+    return {
+      label: "Connect Wallet",
+      icon: Wallet,
+      disabled: false,
+      ariaLabel: "Connect wallet",
+    };
+  };
+
+  const walletConfig = getWalletButtonConfig();
+  const WalletIcon = walletConfig.icon;
 
   return (
     <header className="sticky top-0 z-50 border-b border-liner bg-bg/80 backdrop-blur-xl">
@@ -100,24 +120,52 @@ export default function Header() {
           {isConnected && publicKey ? (
             <div className="flex items-center gap-2 rounded-xl border border-liner bg-card-2 px-3 py-2">
               <Wallet className="h-4 w-4 text-green" aria-hidden="true" />
-              <span className="text-sm font-medium text-text">
+              <span
+                className="text-sm font-medium text-text"
+                title={fullAddressTitle(publicKey)}
+                aria-label={fullAddressAriaLabel(publicKey)}
+              >
                 {truncateAddress(publicKey)}
               </span>
               <button
-                onClick={disconnect}
-                className="ml-1 rounded-lg p-1 text-muted hover:text-text transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-                aria-label="Disconnect wallet"
+                onClick={() => {
+                  handleCopy();
+                }}
+                className="ml-2 rounded-lg p-1 text-xs text-gold hover:bg-gold/10 transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                aria-label="Copy address"
+                title="Copy address"
               >
-                <LogOut className="h-3.5 w-3.5" />
+                <Copy className="h-3.5 w-3.5" aria-hidden="true" />
+              </button>
+              {isCopied && <span className="ml-1 text-xs text-green">Copied!</span>}
+              <button
+                onClick={() => disconnect()}
+                className="ml-1 rounded-lg p-1 text-xs text-muted hover:text-pink hover:bg-pink/10 transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                aria-label="Disconnect wallet"
+                title="Disconnect wallet"
+              >
+                <LogOut className="h-3.5 w-3.5" aria-hidden="true" />
               </button>
             </div>
           ) : (
             <button
               onClick={connect}
-              className="flex items-center gap-2 rounded-xl bg-gold/10 px-4 py-2 text-sm font-medium text-gold border border-gold/30 hover:bg-gold/20 hover:border-gold/50 transition-all focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+              disabled={walletConfig.disabled}
+              aria-label={walletConfig.ariaLabel}
+              aria-busy={isConnecting}
+              className={clsx(
+                "flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-medium border transition-all focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+                isConnecting
+                  ? "bg-gold/5 border-gold/20 text-gold/60 cursor-not-allowed"
+                  : isNotInstalled
+                    ? "bg-blue/10 border-blue/30 text-blue hover:bg-blue/20 hover:border-blue/50"
+                    : networkMismatch
+                      ? "bg-yellow-500/10 border-yellow-500/30 text-yellow-200 hover:bg-yellow-500/20"
+                      : "bg-gold/10 text-gold border-gold/30 hover:bg-gold/20 hover:border-gold/50",
+              )}
             >
-              <Wallet className="h-4 w-4" aria-hidden="true" />
-              Connect Wallet
+              <WalletIcon className={clsx("h-4 w-4", isConnecting && "animate-spin")} aria-hidden="true" />
+              {walletConfig.label}
             </button>
           )}
         </div>
@@ -134,6 +182,7 @@ export default function Header() {
 
       {mobileOpen && (
         <div
+          ref={mobileMenuRef}
           className="border-t border-liner md:hidden"
           role="dialog"
           aria-label="Mobile navigation"
@@ -174,10 +223,22 @@ export default function Header() {
               ) : (
                 <button
                   onClick={() => { connect(); setMobileOpen(false); }}
-                  className="flex w-full items-center justify-center gap-2 rounded-xl bg-gold/10 px-4 py-2.5 text-sm font-medium text-gold border border-gold/30 hover:bg-gold/20 hover:border-gold/50 transition-all focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                  disabled={walletConfig.disabled}
+                  aria-label={walletConfig.ariaLabel}
+                  aria-busy={isConnecting}
+                  className={clsx(
+                    "flex w-full items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium border transition-all focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+                    isConnecting
+                      ? "bg-gold/5 border-gold/20 text-gold/60 cursor-not-allowed"
+                      : isNotInstalled
+                        ? "bg-blue/10 border-blue/30 text-blue hover:bg-blue/20 hover:border-blue/50"
+                        : networkMismatch
+                          ? "bg-yellow-500/10 border-yellow-500/30 text-yellow-200 hover:bg-yellow-500/20"
+                          : "bg-gold/10 text-gold border-gold/30 hover:bg-gold/20 hover:border-gold/50",
+                  )}
                 >
-                  <Wallet className="h-4 w-4" aria-hidden="true" />
-                  Connect Wallet
+                  <WalletIcon className={clsx("h-4 w-4", isConnecting && "animate-spin")} aria-hidden="true" />
+                  {walletConfig.label}
                 </button>
               )}
             </div>

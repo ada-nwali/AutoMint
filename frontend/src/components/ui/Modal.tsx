@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { X } from "lucide-react";
 import clsx from "clsx";
+import { useFocusLock } from "@/hooks/useFocusLock";
 
 interface ModalProps {
   isOpen: boolean;
@@ -14,65 +15,12 @@ interface ModalProps {
   children: React.ReactNode;
 }
 
-const FOCUSABLE =
-  'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
-
 export default function Modal({ isOpen, onClose, title, description, children }: ModalProps) {
   const overlayRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
-  const previousFocusRef = useRef<HTMLElement | null>(null);
   const descId = description ? "modal-description" : undefined;
 
-  const trapFocus = useCallback((e: KeyboardEvent) => {
-    if (e.key !== "Tab" || !contentRef.current) return;
-    const focusable = contentRef.current.querySelectorAll<HTMLElement>(FOCUSABLE);
-    if (focusable.length === 0) return;
-
-    // `focusable.length === 0` already returned above, so both ends exist —
-    // non-null assertion needed under `noUncheckedIndexedAccess`.
-    const first = focusable[0]!;
-    const last = focusable[focusable.length - 1]!;
-
-    if (e.shiftKey) {
-      if (document.activeElement === first) {
-        e.preventDefault();
-        last.focus();
-      }
-    } else {
-      if (document.activeElement === last) {
-        e.preventDefault();
-        first.focus();
-      }
-    }
-  }, []);
-
-  useEffect(() => {
-    if (!isOpen) return;
-
-    previousFocusRef.current = document.activeElement as HTMLElement;
-    document.body.style.overflow = "hidden";
-
-    const timer = requestAnimationFrame(() => {
-      if (contentRef.current) {
-        const firstFocusable = contentRef.current.querySelector<HTMLElement>(FOCUSABLE);
-        firstFocusable?.focus();
-      }
-    });
-
-    const handleKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-      trapFocus(e);
-    };
-
-    document.addEventListener("keydown", handleKey);
-
-    return () => {
-      cancelAnimationFrame(timer);
-      document.removeEventListener("keydown", handleKey);
-      document.body.style.overflow = "";
-      previousFocusRef.current?.focus();
-    };
-  }, [isOpen, onClose, trapFocus]);
+  useFocusLock(contentRef, onClose);
 
   const handleOverlayClick = (e: React.MouseEvent) => {
     if (e.target === overlayRef.current) onClose();

@@ -1,11 +1,12 @@
 "use client";
 
 import React, { useEffect, useRef, useState } from "react";
-import { motion, useSpring, useMotionValue, animate } from "framer-motion";
+import { motion } from "framer-motion";
 import { Zap } from "lucide-react";
 import clsx from "clsx";
 import type { BotNFT } from "@/types";
 import { TIER_META, BOT_TIER_COLORS, BOT_TIER_BG_COLORS } from "@/types";
+import { fromBaseUnits } from "@/lib/format";
 
 export interface BotRateBreakdown {
   bot: BotNFT;
@@ -18,8 +19,10 @@ export interface PointsCounterProps {
   rate: number;
   /** Optional per-bot breakdown for the rate detail rows */
   bots?: BotNFT[];
-  /** Optional AMT token balance */
+  /** Optional AMT token balance, in the token's base units */
   amtBalance?: bigint;
+  /** The AMT token's `decimals()`; the balance row renders once it is known */
+  amtDecimals?: number | undefined;
 }
 
 /**
@@ -49,15 +52,18 @@ function useAnimatedNumber(target: number, duration = 0.8) {
   return displayed;
 }
 
-function PointsCounterComponent({ points, rate, bots, amtBalance }: PointsCounterProps) {
+function PointsCounterComponent({
+  points,
+  rate,
+  bots,
+  amtBalance,
+  amtDecimals,
+}: PointsCounterProps) {
   const animatedPoints = useAnimatedNumber(points);
 
   return (
     <div
-      className={clsx(
-        "rounded-2xl border border-liner bg-card p-5",
-        "flex flex-col gap-4"
-      )}
+      className={clsx("rounded-2xl border border-liner bg-card p-5", "flex flex-col gap-4")}
       data-testid="points-counter"
     >
       {/* Header */}
@@ -83,11 +89,11 @@ function PointsCounterComponent({ points, rate, bots, amtBalance }: PointsCounte
         </p>
 
         {/* AMT balance row */}
-        {amtBalance !== undefined && (
+        {amtBalance !== undefined && amtDecimals !== undefined && (
           <p className="mt-1 text-xs text-muted">
             ≈{" "}
             <span className="text-gold font-semibold">
-              {(Number(amtBalance) / 1_000_000).toLocaleString("en-US", {
+              {fromBaseUnits(amtBalance, amtDecimals).toLocaleString("en-US", {
                 maximumFractionDigits: 2,
               })}
             </span>{" "}
@@ -110,9 +116,7 @@ function PointsCounterComponent({ points, rate, bots, amtBalance }: PointsCounte
       {/* Per-bot rate breakdown */}
       {bots && bots.length > 0 && (
         <div className="flex flex-col gap-2">
-          <p className="text-[10px] uppercase tracking-wider text-muted">
-            Rate Breakdown
-          </p>
+          <p className="text-[10px] uppercase tracking-wider text-muted">Rate Breakdown</p>
           <div className="flex flex-col gap-1.5">
             {bots.map((bot) => {
               const meta = TIER_META[bot.tier];
@@ -130,18 +134,18 @@ function PointsCounterComponent({ points, rate, bots, amtBalance }: PointsCounte
                     <span
                       className={clsx(
                         "flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-xs",
-                        tierBg
+                        tierBg,
                       )}
                       aria-hidden="true"
                     >
                       {meta?.emoji ?? "🤖"}
                     </span>
-                    <span className={clsx("min-w-0 flex-1 truncate text-xs font-medium", tierColor)}>
-                      {bot.name || bot.tier}
+                    <span
+                      className={clsx("min-w-0 flex-1 truncate text-xs font-medium", tierColor)}
+                    >
+                      {bot.nickname || bot.tier}
                     </span>
-                    <span className="shrink-0 text-[10px] text-muted">
-                      #{bot.id.toString()}
-                    </span>
+                    <span className="shrink-0 text-[10px] text-muted">#{bot.id.toString()}</span>
                   </div>
                   <span className="shrink-0 text-xs font-semibold text-text">
                     +{bot.accrual_rate.toString()}{" "}

@@ -17,7 +17,7 @@ Initialize the contract with an admin address and the points-to-AMT conversion r
 
 Errors:
 - `AlreadyInitialized`: The contract has already been initialized.
-- `Unauthorized`: `points_per_amt` is `0`.
+- `InvalidConfig`: `points_per_amt` is `0`.
 
 Example:
 
@@ -103,7 +103,7 @@ Returns the number of points settled in this claim (not the AMT amount minted).
 
 Errors:
 - `NotStarted`: `user` has no accrual record.
-- `Unauthorized`: The contract configuration could not be read (not initialized).
+- `NotInitialized`: The contract configuration could not be read (not initialized).
 
 Example:
 

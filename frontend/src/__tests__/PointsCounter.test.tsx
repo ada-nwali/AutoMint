@@ -48,9 +48,23 @@ describe("PointsCounter enhanced", () => {
   });
 
   it("displays AMT balance when provided", () => {
-    render(<PointsCounter points={100} rate={10} amtBalance={BigInt(1500000)} />);
+    render(
+      <PointsCounter points={100} rate={10} amtBalance={BigInt(15_000_000)} amtDecimals={7} />
+    );
     expect(screen.getByText(/AMT/)).toBeInTheDocument();
     expect(screen.getByText("1.5")).toBeInTheDocument();
+  });
+
+  it("scales the AMT balance by the token's own decimals (#479)", () => {
+    render(
+      <PointsCounter points={100} rate={10} amtBalance={BigInt(1_500_000)} amtDecimals={6} />
+    );
+    expect(screen.getByText("1.5")).toBeInTheDocument();
+  });
+
+  it("does not display AMT balance until the token's decimals are known", () => {
+    render(<PointsCounter points={100} rate={10} amtBalance={BigInt(15_000_000)} />);
+    expect(screen.queryByText(/AMT/)).not.toBeInTheDocument();
   });
 
   it("does not display AMT balance when not provided", () => {

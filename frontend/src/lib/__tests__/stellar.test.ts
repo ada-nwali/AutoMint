@@ -10,6 +10,8 @@
 const mockGetAccount = jest.fn();
 const mockSimulateTransaction = jest.fn();
 const mockPrepareTransaction = jest.fn();
+const mockSendTransaction = jest.fn();
+const mockGetTransaction = jest.fn();
 const mockIsSimulationError = jest.fn();
 const mockScValToNative = jest.fn();
 const mockBuiltTx = { tx: true, toXDR: jest.fn(() => "UNPREPARED_XDR") };
@@ -21,6 +23,8 @@ jest.mock("@stellar/stellar-sdk", () => ({
       getAccount: mockGetAccount,
       simulateTransaction: mockSimulateTransaction,
       prepareTransaction: mockPrepareTransaction,
+      sendTransaction: mockSendTransaction,
+      getTransaction: mockGetTransaction,
     })),
     Api: {
       isSimulationError: (...args: unknown[]) => mockIsSimulationError(...args),
@@ -35,7 +39,9 @@ jest.mock("@stellar/stellar-sdk", () => ({
     build: jest.fn(() => mockBuiltTx),
   })),
   scValToNative: (...args: unknown[]) => mockScValToNative(...args),
-  nativeToScVal: jest.fn(() => ({ scv: true })),
+  // The real encoder, so the ScVal helper round-trips below exercise actual
+  // XDR. None of the wrapper tests depend on its output.
+  nativeToScVal: jest.requireActual("@stellar/stellar-sdk").nativeToScVal,
   xdr: {},
 }));
 
@@ -52,7 +58,22 @@ import {
   requestAccess,
   getNetwork,
 } from "@stellar/freighter-api";
-import { connectFreighter, simulateContractCall, buildPreparedTx } from "../stellar";
+import {
+  connectFreighter,
+  simulateContractCall,
+  buildPreparedTx,
+  submitTx,
+  invalidateReadCaches,
+  addressToScVal,
+  u64ToScVal,
+  u32ToScVal,
+  i128ToScVal,
+  stringToScVal,
+  boolToScVal,
+} from "../stellar";
+
+/** A stand-in ScVal exposing only the discriminant `simulateContractCall` inspects. */
+const scVal = (type = "scvU32") => ({ type, switch: () => ({ name: type }) });
 
 const mockIsConnected = isConnected as jest.Mock;
 const mockRequestAccess = requestAccess as jest.Mock;
@@ -60,6 +81,9 @@ const mockGetNetwork = getNetwork as jest.Mock;
 
 beforeEach(() => {
   jest.clearAllMocks();
+  // Read caches (#482) are module-level state: start every test cold so
+  // account-TTL / in-flight entries never leak across cases.
+  invalidateReadCaches();
 });
 
 describe("connectFreighter", () => {
@@ -102,18 +126,40 @@ describe("connectFreighter", () => {
 describe("simulateContractCall", () => {
   beforeEach(() => {
     mockGetAccount.mockResolvedValue({ accountId: () => "GSRC" });
+    mockIsSimulationError.mockReturnValue(false);
   });
 
   it("returns the decoded native value on success", async () => {
-    mockSimulateTransaction.mockResolvedValue({
-      result: { retval: { xdr: true } },
-    });
-    mockIsSimulationError.mockReturnValue(false);
+    const retval = scVal();
+    mockSimulateTransaction.mockResolvedValue({ result: { retval } });
     mockScValToNative.mockReturnValue(42);
 
-    const value = await simulateContractCall("CCONTRACT", "total_users", [], "GSRC");
+    const value = await simulateContractCall<number>("CCONTRACT", "total_users", [], "GSRC");
     expect(value).toBe(42);
-    expect(mockScValToNative).toHaveBeenCalledWith({ xdr: true });
+    expect(mockScValToNative).toHaveBeenCalledWith(retval);
+  });
+
+  it.each([
+    ["zero", 0],
+    ["false", false],
+    ["an empty vector", []],
+    ["an empty string", ""],
+  ])("decodes a returned %s instead of treating it as absent", async (_label, native) => {
+    mockSimulateTransaction.mockResolvedValue({ result: { retval: scVal() } });
+    mockScValToNative.mockReturnValue(native);
+
+    const value = await simulateContractCall("CCONTRACT", "balance", [], "GSRC");
+    expect(value).toStrictEqual(native);
+  });
+
+  it("resolves to undefined, without throwing, when the function returns void", async () => {
+    mockSimulateTransaction.mockResolvedValue({
+      result: { retval: scVal("scvVoid") },
+    });
+
+    const value = await simulateContractCall("CCONTRACT", "set_flag", [], "GSRC");
+    expect(value).toBeUndefined();
+    expect(mockScValToNative).not.toHaveBeenCalled();
   });
 
   it("throws when the simulation reports an error", async () => {
@@ -125,13 +171,12 @@ describe("simulateContractCall", () => {
     ).rejects.toThrow(/Simulation failed/i);
   });
 
-  it("throws when there is no return value", async () => {
-    mockSimulateTransaction.mockResolvedValue({ result: {} });
-    mockIsSimulationError.mockReturnValue(false);
+  it("throws when the RPC response carries no result at all", async () => {
+    mockSimulateTransaction.mockResolvedValue({});
 
     await expect(
       simulateContractCall("CCONTRACT", "balance", [], "GSRC")
-    ).rejects.toThrow(/No return value/i);
+    ).rejects.toThrow(/No result/i);
   });
 });
 
@@ -162,5 +207,226 @@ describe("buildPreparedTx", () => {
     await expect(
       buildPreparedTx("CCONTRACT", "register", [], "GSRC")
     ).rejects.toThrow(/insufficient resource fee/i);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Read-path caching (#482)
+// ---------------------------------------------------------------------------
+describe("read caching (#482)", () => {
+  const src = "GCACHE";
+
+  beforeEach(() => {
+    mockGetAccount.mockResolvedValue({ accountId: () => src });
+    mockSimulateTransaction.mockResolvedValue({
+      result: { retval: scVal() },
+    });
+    mockIsSimulationError.mockReturnValue(false);
+    mockScValToNative.mockReturnValue(1);
+  });
+
+  it("makes a single getAccount fetch for six concurrent reads", async () => {
+    await Promise.all([
+      simulateContractCall("C1", "a", [], src),
+      simulateContractCall("C2", "b", [], src),
+      simulateContractCall("C3", "c", [], src),
+      simulateContractCall("C4", "d", [], src),
+      simulateContractCall("C5", "e", [], src),
+      simulateContractCall("C6", "f", [], src),
+    ]);
+    expect(mockGetAccount).toHaveBeenCalledTimes(1);
+    expect(mockSimulateTransaction).toHaveBeenCalledTimes(6);
+  });
+
+  it("shares one in-flight promise for identical concurrent simulations", async () => {
+    const [first, second] = await Promise.all([
+      simulateContractCall("CX", "total_users", [], src),
+      simulateContractCall("CX", "total_users", [], src),
+    ]);
+    expect(first).toBe(second);
+    expect(mockSimulateTransaction).toHaveBeenCalledTimes(1);
+    expect(mockGetAccount).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not cache a failed account fetch and propagates the error", async () => {
+    mockGetAccount.mockRejectedValueOnce(new Error("account unavailable"));
+
+    await expect(
+      simulateContractCall("CX", "x", [], src)
+    ).rejects.toThrow("account unavailable");
+
+    // The failure was never cached: the next read retries getAccount.
+    await simulateContractCall("CX", "x", [], src);
+    expect(mockGetAccount).toHaveBeenCalledTimes(2);
+  });
+
+  it("keys simulations by encoded args so distinct args are not deduped", async () => {
+    const withXdr = { toXDR: () => ({ toString: () => "base64-arg" }) };
+    const withThrowingXdr = {
+      toXDR: () => {
+        throw new Error("nope");
+      },
+    };
+    const plain = { plain: true };
+
+    // One of each key shape: base64 XDR, JSON fallback, throwing toXDR.
+    // Sequential calls must NOT share (entries are dropped once settled).
+    await simulateContractCall("CX", "m", [withXdr as never], src);
+    await simulateContractCall("CX", "m", [plain as never], src);
+    await simulateContractCall("CX", "m", [withThrowingXdr as never], src);
+    expect(mockSimulateTransaction).toHaveBeenCalledTimes(3);
+  });
+
+  it("drops the account cache after a confirmed transaction", async () => {
+    await simulateContractCall("CX", "balance", [], src);
+    expect(mockGetAccount).toHaveBeenCalledTimes(1);
+
+    mockSendTransaction.mockResolvedValue({
+      status: "PENDING",
+      hash: "abc123",
+    });
+    mockGetTransaction.mockResolvedValue({ status: "SUCCESS" });
+    await submitTx("SIGNED_XDR");
+
+    await simulateContractCall("CX", "balance", [], src);
+    expect(mockGetAccount).toHaveBeenCalledTimes(2);
+  });
+
+  it("invalidates the caches after a failed transaction too", async () => {
+    await simulateContractCall("CX", "balance", [], src);
+    expect(mockGetAccount).toHaveBeenCalledTimes(1);
+
+    mockSendTransaction.mockResolvedValue({
+      status: "PENDING",
+      hash: "abc123",
+    });
+    mockGetTransaction.mockResolvedValue({
+      status: "FAILED",
+      resultXdr: "AAAA",
+    });
+    await expect(submitTx("SIGNED_XDR")).rejects.toThrow(
+      /Transaction failed on-chain/
+    );
+
+    await simulateContractCall("CX", "balance", [], src);
+    expect(mockGetAccount).toHaveBeenCalledTimes(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ScVal helpers
+//
+// Merged from the former src/lib/stellar.test.ts (#489) so stellar.ts has a
+// single test file. Encoding goes through the real `nativeToScVal` passed
+// through by the SDK mock above; decoding uses the actual `scValToNative`.
+// ---------------------------------------------------------------------------
+const { scValToNative } = jest.requireActual("@stellar/stellar-sdk");
+
+describe("ScVal helpers in stellar.ts", () => {
+  it("addressToScVal round-trips correctly via scValToNative", () => {
+    const address = "GBDUJFNDCXMOAY654HWWDVOHGGCL4NZIAXGXDF4WODNUMUPTIGULZTN2";
+    const scVal = addressToScVal(address);
+    const native = scValToNative(scVal);
+    expect(native).toBe(address);
+  });
+
+  it("u64ToScVal round-trips correctly via scValToNative", () => {
+    const val = 123456789n;
+    const scVal = u64ToScVal(val);
+    const native = scValToNative(scVal);
+    expect(native).toBe(val);
+  });
+
+  it("u32ToScVal round-trips correctly via scValToNative", () => {
+    const val = 12345;
+    const scVal = u32ToScVal(val);
+    const native = scValToNative(scVal);
+    expect(native).toBe(val);
+  });
+
+  it("i128ToScVal round-trips correctly via scValToNative", () => {
+    const val = -12345678901234567890n;
+    const scVal = i128ToScVal(val);
+    const native = scValToNative(scVal);
+    expect(native).toBe(val);
+  });
+
+  it("stringToScVal round-trips correctly via scValToNative", () => {
+    const val = "hello world";
+    const scVal = stringToScVal(val);
+    const native = scValToNative(scVal);
+    // Note: Soroban strings often decode to Buffer or string depending on SDK versions.
+    // The stellar-sdk scValToNative typically decodes string to Buffer or string?
+    // We will see what test says. We might need to convert Buffer to string.
+    if (Buffer.isBuffer(native)) {
+      expect(native.toString("utf-8")).toBe(val);
+    } else {
+      expect(native).toBe(val);
+    }
+  });
+
+  it("boolToScVal round-trips correctly via scValToNative", () => {
+    expect(scValToNative(boolToScVal(true))).toBe(true);
+    expect(scValToNative(boolToScVal(false))).toBe(false);
+  });
+
+  describe("u64ToScVal edge cases", () => {
+    it("encodes zero correctly", () => {
+      const val = 0n;
+      const scVal = u64ToScVal(val);
+      const native = scValToNative(scVal);
+      expect(native).toBe(val);
+    });
+
+    it("encodes max safe integer for u64 correctly", () => {
+      const val = 18446744073709551615n; // 2^64 - 1
+      const scVal = u64ToScVal(val);
+      const native = scValToNative(scVal);
+      expect(native).toBe(val);
+    });
+
+    it("encodes very large bigint correctly", () => {
+      const val = 9223372036854775807n; // Max i64
+      const scVal = u64ToScVal(val);
+      const native = scValToNative(scVal);
+      expect(native).toBe(val);
+    });
+  });
+
+  describe("i128ToScVal edge cases", () => {
+    it("encodes zero correctly", () => {
+      const val = 0n;
+      const scVal = i128ToScVal(val);
+      const native = scValToNative(scVal);
+      expect(native).toBe(val);
+    });
+
+    it("encodes max safe integer for i128 correctly", () => {
+      const val = 170141183460469231731687303715884105727n; // 2^127 - 1
+      const scVal = i128ToScVal(val);
+      const native = scValToNative(scVal);
+      expect(native).toBe(val);
+    });
+
+    it("encodes min value for i128 correctly", () => {
+      const val = -170141183460469231731687303715884105728n; // -2^127
+      const scVal = i128ToScVal(val);
+      const native = scValToNative(scVal);
+      expect(native).toBe(val);
+    });
+
+    it("encodes very large negative bigint correctly", () => {
+      const val = -9223372036854775808n; // Min i64
+      const scVal = i128ToScVal(val);
+      const native = scValToNative(scVal);
+      expect(native).toBe(val);
+    });
+
+    it("encodes very large positive bigint correctly", () => {
+      const val = 9223372036854775807n; // Max i64
+      const scVal = i128ToScVal(val);
+      const native = scValToNative(scVal);
+      expect(native).toBe(val);
+    });
   });
 });

@@ -15,7 +15,8 @@ soroban-sdk = { workspace = true }
 automint-bot-nft = { path = "../bot_nft" }
 
 [dev-dependencies]
-soroban-sdk = { version = "21", features = ["testutils"] }
+soroban-sdk = { version = "=21.7.7", features = ["testutils"] }
+automint-accrual = { path = "../accrual", features = ["testutils"] }
 automint-bot-nft = { path = "../bot_nft", features = ["testutils"] }
 automint-registry = { path = "../registry", features = ["testutils"] }
 automint-token = { path = "../token", features = ["testutils"] }

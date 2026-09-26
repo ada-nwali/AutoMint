@@ -8,41 +8,51 @@ import {
   useAccrualState,
   useAmtBalance,
   useClaim,
+  useAnimatedPoints,
 } from '../hooks/useAccrual';
 import {
-  registerUser,
-  mintBasicBot,
-  startAccrual,
   isRegistered,
   getUserProfile,
   getUserBots,
   getAccrualState,
+  getAccrualConfig,
   getAmtBalance,
-  claimPoints,
+  getUserTotalRate,
 } from '@/lib/contracts';
+import { executeTransaction } from '@/lib/transaction';
 import { useWalletStore } from '@/store/walletStore';
+import { qk } from '@/lib/queryKeys';
 import { toast } from 'sonner';
 import type { UserProfile, AccrualState } from '@/types';
 
 // Mock dependencies
 jest.mock('@/lib/contracts');
-jest.mock('@/store/walletStore');
+jest.mock('@/lib/transaction', () => ({
+  executeTransaction: jest.fn(),
+}));
+jest.mock('@/store/walletStore', () => ({
+  ...jest.requireActual('@/store/walletStore'),
+  useWalletStore: jest.fn(),
+}));
 jest.mock('sonner');
 
-const mockRegisterUser = registerUser as jest.MockedFunction<typeof registerUser>;
-const mockMintBasicBot = mintBasicBot as jest.MockedFunction<typeof mintBasicBot>;
-const mockStartAccrual = startAccrual as jest.MockedFunction<typeof startAccrual>;
 const mockIsRegistered = isRegistered as jest.MockedFunction<typeof isRegistered>;
 const mockGetUserProfile = getUserProfile as jest.MockedFunction<typeof getUserProfile>;
 const mockGetUserBots = getUserBots as jest.MockedFunction<typeof getUserBots>;
 const mockGetAccrualState = getAccrualState as jest.MockedFunction<typeof getAccrualState>;
+const mockGetAccrualConfig = getAccrualConfig as jest.MockedFunction<typeof getAccrualConfig>;
 const mockGetAmtBalance = getAmtBalance as jest.MockedFunction<typeof getAmtBalance>;
-const mockClaimPoints = claimPoints as jest.MockedFunction<typeof claimPoints>;
+const mockGetUserTotalRate = getUserTotalRate as jest.MockedFunction<typeof getUserTotalRate>;
+const mockExecuteTransaction = executeTransaction as jest.MockedFunction<
+  typeof executeTransaction
+>;
 const mockUseWalletStore = useWalletStore as jest.MockedFunction<typeof useWalletStore>;
 
 describe('useAccrual Hooks', () => {
   let queryClient: QueryClient;
-  const mockPublicKey = 'GABC123456';
+  // A structurally valid ed25519 public key — nativeToScVal(..., {type:
+  // "address"}) rejects placeholder strings like "GABC123".
+  const mockPublicKey = 'GD6VCGW7N4YUZUG2VKRN4DKIXGTBJZTZBV5ICATW2YCDCOS36VYPXAR3';
 
   beforeEach(() => {
     queryClient = new QueryClient({
@@ -58,6 +68,25 @@ describe('useAccrual Hooks', () => {
     (mockUseWalletStore as unknown as jest.Mock).mockImplementation((selector) =>
       selector({ publicKey: mockPublicKey })
     );
+
+    // Every transaction "confirms" immediately unless a test overrides it.
+    mockExecuteTransaction.mockImplementation(async (opts) => {
+      opts.onStatus({ stage: 'success', explorerUrl: 'https://explorer.test/tx/1' });
+      return 'ok';
+    });
+    // Default on-chain state: a completely fresh user.
+    mockIsRegistered.mockResolvedValue(false);
+    mockGetUserBots.mockResolvedValue([]);
+    mockGetAccrualState.mockResolvedValue(null);
+
+    // Contract IDs must be valid strkeys — useClaim runs them through
+    // nativeToScVal(..., {type: "address"}).
+    process.env.NEXT_PUBLIC_ACCRUAL_CONTRACT_ID =
+      'CAAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQC526';
+    process.env.NEXT_PUBLIC_TOKEN_CONTRACT_ID =
+      'CABAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAFNSZ';
+    process.env.NEXT_PUBLIC_REGISTRY_CONTRACT_ID =
+      'CAAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQC526';
   });
 
   afterEach(() => {
@@ -69,10 +98,47 @@ describe('useAccrual Hooks', () => {
   );
 
   describe('useRegister', () => {
-    it('should successfully register a user', async () => {
-      mockRegisterUser.mockResolvedValue('tx1');
-      mockMintBasicBot.mockResolvedValue(1n);
-      mockStartAccrual.mockResolvedValue('tx3');
+    it('runs all three steps sequentially for a fresh user (#452)', async () => {
+      const { result } = renderHook(() => useRegister(), { wrapper });
+
+      act(() => {
+        result.current.mutate('testuser');
+      });
+
+      await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+      // Resume detection ran first.
+      expect(mockIsRegistered).toHaveBeenCalledWith(mockPublicKey);
+      expect(mockGetUserBots).toHaveBeenCalledWith(mockPublicKey);
+      expect(mockGetAccrualState).toHaveBeenCalledWith(mockPublicKey);
+
+      // Exactly three transactions, in pipeline order, each awaiting the
+      // previous one's confirmation.
+      const methods = mockExecuteTransaction.mock.calls.map(
+        (call) => call[0].method
+      );
+      expect(methods).toEqual(['register', 'mint_basic', 'start_accrual']);
+      for (const [call] of mockExecuteTransaction.mock.calls) {
+        expect(call.sourceAddress).toBe(mockPublicKey);
+      }
+
+      expect(result.current.progress).toEqual({
+        stepIndex: 3,
+        step: 'done',
+      });
+      expect(toast.success).toHaveBeenCalledWith(
+        'Registration complete! Welcome to AutoMint!'
+      );
+    });
+
+    it('skips every step when the chain is already fully registered (#452)', async () => {
+      mockIsRegistered.mockResolvedValue(true);
+      mockGetUserBots.mockResolvedValue([1n]);
+      mockGetAccrualState.mockResolvedValue({
+        last_claim_ts: 1n,
+        carry_points: 0n,
+        lifetime_points: 0n,
+      });
 
       const { result } = renderHook(() => useRegister(), { wrapper });
 
@@ -82,15 +148,68 @@ describe('useAccrual Hooks', () => {
 
       await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
-      expect(mockRegisterUser).toHaveBeenCalledWith(mockPublicKey, 'testuser');
-      expect(mockMintBasicBot).toHaveBeenCalledWith(mockPublicKey);
-      expect(mockStartAccrual).toHaveBeenCalledWith(mockPublicKey, 1);
-      expect(toast.success).toHaveBeenCalledWith('Registration complete! Welcome to AutoMint!');
+      expect(mockExecuteTransaction).not.toHaveBeenCalled();
+      expect(toast.success).toHaveBeenCalledWith(
+        'Registration complete! Welcome to AutoMint!'
+      );
     });
 
-    it('should handle registration failure', async () => {
+    it('resumes at the mint step when registration already landed (#452)', async () => {
+      mockIsRegistered.mockResolvedValue(true);
+      mockGetUserBots.mockResolvedValue([]);
+      mockGetAccrualState.mockResolvedValue(null);
+
+      const { result } = renderHook(() => useRegister(), { wrapper });
+
+      act(() => {
+        result.current.mutate('testuser');
+      });
+
+      await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+      const methods = mockExecuteTransaction.mock.calls.map(
+        (call) => call[0].method
+      );
+      // register is NOT re-run — that would hit the registry's
+      // already-registered error and trap the user.
+      expect(methods).toEqual(['mint_basic', 'start_accrual']);
+    });
+
+    it('resumes at the accrual step when register and mint already landed (#452)', async () => {
+      mockIsRegistered.mockResolvedValue(true);
+      mockGetUserBots.mockResolvedValue([7n]);
+      mockGetAccrualState.mockResolvedValue(null);
+
+      const { result } = renderHook(() => useRegister(), { wrapper });
+
+      act(() => {
+        result.current.mutate('testuser');
+      });
+
+      await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+      const methods = mockExecuteTransaction.mock.calls.map(
+        (call) => call[0].method
+      );
+      expect(methods).toEqual(['start_accrual']);
+    });
+
+    it('ends in a done progress state with no pending timers (#452)', async () => {
+      const { result } = renderHook(() => useRegister(), { wrapper });
+
+      act(() => {
+        result.current.mutate('testuser');
+      });
+
+      await waitFor(() => expect(result.current.isSuccess).toBe(true));
+      expect(result.current.progress).toEqual({ stepIndex: 3, step: 'done' });
+      // No artificial delay: the mutation settles without timers (#452).
+      expect(jest.getTimerCount()).toBe(0);
+    });
+
+    it('propagates a failed step and leaves later steps unrun (#452)', async () => {
       const error = new Error('Registration failed');
-      mockRegisterUser.mockRejectedValue(error);
+      mockExecuteTransaction.mockImplementation(() => Promise.reject(error));
 
       const { result } = renderHook(() => useRegister(), { wrapper });
 
@@ -101,7 +220,11 @@ describe('useAccrual Hooks', () => {
       await waitFor(() => expect(result.current.isError).toBe(true));
 
       expect(result.current.error).toEqual(error);
-      expect(toast.error).toHaveBeenCalledWith('Registration failed');
+      // Stops after the first failure — no mint/accrual attempts.
+      expect(mockExecuteTransaction).toHaveBeenCalledTimes(1);
+      expect(toast.success).not.toHaveBeenCalledWith(
+        'Registration complete! Welcome to AutoMint!'
+      );
     });
 
     it('should throw error when wallet not connected', async () => {
@@ -118,6 +241,7 @@ describe('useAccrual Hooks', () => {
       await waitFor(() => expect(result.current.isError).toBe(true));
 
       expect(result.current.error).toEqual(new Error('Wallet not connected'));
+      expect(mockIsRegistered).not.toHaveBeenCalled();
     });
   });
 
@@ -227,7 +351,8 @@ describe('useAccrual Hooks', () => {
     it('should return accrual state', async () => {
       const mockState: AccrualState = {
         last_claim_ts: 1234567890n,
-        total_claimed_points: 1000n,
+        carry_points: 1000n,
+        lifetime_points: 2500n,
       };
 
       mockGetAccrualState.mockResolvedValue(mockState);
@@ -278,8 +403,6 @@ describe('useAccrual Hooks', () => {
 
   describe('useClaim', () => {
     it('should successfully claim points', async () => {
-      mockClaimPoints.mockResolvedValue('tx_hash');
-
       const { result } = renderHook(() => useClaim(), { wrapper });
 
       act(() => {
@@ -288,13 +411,22 @@ describe('useAccrual Hooks', () => {
 
       await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
-      expect(mockClaimPoints).toHaveBeenCalledWith(mockPublicKey);
-      expect(toast.success).toHaveBeenCalledWith('Points claimed successfully!');
+      expect(mockExecuteTransaction).toHaveBeenCalledTimes(1);
+      const call = mockExecuteTransaction.mock.calls[0][0];
+      expect(call.method).toBe('claim');
+      expect(call.sourceAddress).toBe(mockPublicKey);
+      expect(toast.success).toHaveBeenCalledWith(
+        'Points claimed successfully!',
+        expect.objectContaining({ id: 'claim' })
+      );
     });
 
     it('should handle error when claiming fails', async () => {
       const error = new Error('Claim failed');
-      mockClaimPoints.mockRejectedValue(error);
+      mockExecuteTransaction.mockImplementation((opts) => {
+        opts.onStatus({ stage: 'error', error: 'Claim failed' });
+        return Promise.reject(error);
+      });
 
       const { result } = renderHook(() => useClaim(), { wrapper });
 
@@ -305,7 +437,9 @@ describe('useAccrual Hooks', () => {
       await waitFor(() => expect(result.current.isError).toBe(true));
 
       expect(result.current.error).toEqual(error);
-      expect(toast.error).toHaveBeenCalledWith('Claim failed');
+      expect(toast.error).toHaveBeenCalledWith('Claim failed: Claim failed', {
+        id: 'claim',
+      });
     });
 
     it('should throw error when wallet not connected', async () => {
@@ -322,6 +456,137 @@ describe('useAccrual Hooks', () => {
       await waitFor(() => expect(result.current.isError).toBe(true));
 
       expect(result.current.error).toEqual(new Error('Wallet not connected'));
+      expect(mockExecuteTransaction).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe('useAnimatedPoints (#491, #490)', () => {
+  let qc: QueryClient;
+  const pk = 'GABCUSER';
+
+  beforeEach(() => {
+    qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    jest.clearAllMocks();
+    jest.useFakeTimers();
+    (mockUseWalletStore as unknown as jest.Mock).mockImplementation((selector) =>
+      selector({ publicKey: pk })
+    );
+    // A single Basic bot unless a test says otherwise.
+    mockGetUserTotalRate.mockResolvedValue(1n);
+    // The on-chain conversion threshold (#477) — 100 unless a test overrides it.
+    mockGetAccrualConfig.mockResolvedValue({ pointsPerAmt: 100 });
+  });
+  afterEach(() => jest.useRealTimers());
+
+  const wrap = ({ children }: { children: React.ReactNode }) => (
+    <QueryClientProvider client={qc}>{children}</QueryClientProvider>
+  );
+
+  it('bases the headline on the registry lifetime total plus pending, with the carry shown separately', async () => {
+    const lastClaim = Math.floor(Date.now() / 1000) - 3600; // one hour ago
+    mockGetUserProfile.mockResolvedValue({ username: 'u', points: 12_345n });
+    mockGetAccrualState.mockResolvedValue({
+      last_claim_ts: BigInt(lastClaim),
+      carry_points: 42n,
+      lifetime_points: 12_345n,
+    });
+
+    const { result } = renderHook(() => useAnimatedPoints(), { wrapper: wrap });
+
+    // Waiting on the composite total also waits for profile (12,345) and the
+    // interpolated pending (1 point at rate 1/hr over 3600s) to settle.
+    await waitFor(() => {
+      expect(result.current.total).toBe(12_346n);
+    });
+    expect(result.current.pending).toBe(1n);
+    // The carry is surfaced separately as "progress to next AMT" — it is NOT
+    // folded into the headline, which is the bug (#491).
+    expect(result.current.progressToNext).toBe(42n);
+  });
+
+  it('derives progressToNextRatio from the fetched accrual config, not a hardcoded threshold (#477)', async () => {
+    mockGetAccrualConfig.mockResolvedValue({ pointsPerAmt: 200 });
+    mockGetUserProfile.mockResolvedValue({ username: 'u', points: 0n });
+    mockGetAccrualState.mockResolvedValue({
+      last_claim_ts: BigInt(Math.floor(Date.now() / 1000)),
+      carry_points: 50n,
+      lifetime_points: 0n,
+    });
+
+    const { result } = renderHook(() => useAnimatedPoints(), { wrapper: wrap });
+
+    await waitFor(() => expect(result.current.pointsPerAmt).toBe(200));
+    // 50 / 200 — if this were still derived from the old hardcoded 1000
+    // default, it would read 0.05 instead of 0.25.
+    expect(result.current.progressToNextRatio).toBeCloseTo(0.25);
+    expect(mockGetAccrualConfig).toHaveBeenCalled();
+  });
+
+  it('leaves progressToNextRatio undefined until the accrual config query resolves', async () => {
+    mockGetAccrualConfig.mockReturnValue(new Promise(() => {})); // never resolves
+    mockGetUserProfile.mockResolvedValue({ username: 'u', points: 0n });
+    mockGetAccrualState.mockResolvedValue({
+      last_claim_ts: BigInt(Math.floor(Date.now() / 1000)),
+      carry_points: 50n,
+      lifetime_points: 0n,
+    });
+
+    const { result } = renderHook(() => useAnimatedPoints(), { wrapper: wrap });
+
+    expect(result.current.pointsPerAmt).toBeUndefined();
+    expect(result.current.progressToNextRatio).toBeUndefined();
+  });
+
+  it('never renders a total below the registry lifetime points across a claim', async () => {
+    // Immediately after a claim: last_claim_ts is now, carry reset to a few.
+    mockGetUserProfile.mockResolvedValue({ username: 'u', points: 1000n });
+    mockGetAccrualState.mockResolvedValue({
+      last_claim_ts: BigInt(Math.floor(Date.now() / 1000)),
+      carry_points: 3n,
+      lifetime_points: 1000n,
+    });
+
+    const { result } = renderHook(() => useAnimatedPoints(), { wrapper: wrap });
+
+    await waitFor(() => expect(result.current.total).toBe(1000n));
+    expect(result.current.total).toBeGreaterThanOrEqual(1000n);
+  });
+
+  it('ticks at the on-chain total rate of a multi-bot account, not a default', async () => {
+    // Basic (1) + Diamond (500) = 501 pts/hr, as reported by get_user_total_rate.
+    mockGetUserTotalRate.mockResolvedValue(501n);
+    mockGetUserProfile.mockResolvedValue({ username: 'u', points: 0n });
+    mockGetAccrualState.mockResolvedValue({
+      last_claim_ts: BigInt(Math.floor(Date.now() / 1000) - 3600), // one hour ago
+      carry_points: 0n,
+      lifetime_points: 0n,
+    });
+
+    const { result } = renderHook(() => useAnimatedPoints(), { wrapper: wrap });
+
+    await waitFor(() => expect(result.current.pending).toBe(501n));
+    expect(mockGetUserTotalRate).toHaveBeenCalledWith(pk);
+  });
+
+  it('changes the tick rate once a poll returns a new rate after the bots change', async () => {
+    mockGetUserProfile.mockResolvedValue({ username: 'u', points: 0n });
+    mockGetAccrualState.mockResolvedValue({
+      last_claim_ts: BigInt(Math.floor(Date.now() / 1000) - 3600),
+      carry_points: 0n,
+      lifetime_points: 0n,
+    });
+
+    const { result } = renderHook(() => useAnimatedPoints(), { wrapper: wrap });
+    await waitFor(() => expect(result.current.pending).toBe(1n));
+
+    // The user buys a Gold bot. Bot-changing mutations invalidate qk.bots,
+    // under which the total rate is keyed, so it refetches the new rate.
+    mockGetUserTotalRate.mockResolvedValue(101n);
+    await act(async () => {
+      await qc.invalidateQueries({ queryKey: qk.bots(pk) });
+    });
+
+    await waitFor(() => expect(result.current.pending).toBe(101n));
   });
 });

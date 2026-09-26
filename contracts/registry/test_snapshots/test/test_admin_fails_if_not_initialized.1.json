@@ -87,7 +87,7 @@
                 "bytes": "0000000000000000000000000000000000000000000000000000000000000001"
               },
               {
-                "symbol": "admin"
+                "symbol": "get_admin"
               }
             ],
             "data": "void"
@@ -108,7 +108,7 @@
                 "symbol": "fn_return"
               },
               {
-                "symbol": "admin"
+                "symbol": "get_admin"
               }
             ],
             "data": {
@@ -169,7 +169,7 @@
                   "string": "contract try_call failed"
                 },
                 {
-                  "symbol": "admin"
+                  "symbol": "get_admin"
                 },
                 {
                   "vec": []

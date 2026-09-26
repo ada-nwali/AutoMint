@@ -42,24 +42,39 @@ describe("Footer Component", () => {
   it("renders external resource/community links that open in a new tab safely", () => {
     render(<Footer />);
 
-    const docsLink = screen.getByRole("link", { name: /Documentation/i });
-    expect(docsLink).toHaveAttribute("href", "https://soroban.stellar.org");
-    expect(docsLink).toHaveAttribute("target", "_blank");
-    expect(docsLink).toHaveAttribute("rel", "noopener noreferrer");
+    const repoUrl = "https://github.com/Ada-Girly881/AutoMint";
+
+    const projectDocs = screen.getByRole("link", { name: /Project Docs/i });
+    expect(projectDocs).toHaveAttribute(
+      "href",
+      `${repoUrl}/tree/testnet-implementation/docs`
+    );
+    expect(projectDocs).toHaveAttribute("target", "_blank");
+    expect(projectDocs).toHaveAttribute("rel", "noopener noreferrer");
+
+    const deploymentGuide = screen.getByRole("link", { name: /Deployment Guide/i });
+    expect(deploymentGuide).toHaveAttribute(
+      "href",
+      `${repoUrl}/blob/testnet-implementation/docs/DEPLOYMENT.md`
+    );
+    expect(deploymentGuide).toHaveAttribute("target", "_blank");
 
     const githubLink = screen.getByRole("link", { name: /GitHub/i });
-    expect(githubLink).toHaveAttribute(
-      "href",
-      "https://github.com/Ada-Girly881/AutoMint"
-    );
+    expect(githubLink).toHaveAttribute("href", repoUrl);
     expect(githubLink).toHaveAttribute("target", "_blank");
 
     const licenseLink = screen.getByRole("link", { name: /License/i });
     expect(licenseLink).toHaveAttribute(
       "href",
-      "https://github.com/Alaka-ibr/AutoMint/blob/main/LICENSE"
+      `${repoUrl}/blob/testnet-implementation/LICENSE`
     );
     expect(licenseLink).toHaveAttribute("target", "_blank");
+  });
+
+  it("renders the network indicator for the configured network", () => {
+    render(<Footer />);
+
+    expect(screen.getByText(/Network: (TESTNET|MAINNET)/i)).toBeInTheDocument();
   });
 
   it("renders the current year in the copyright notice", () => {

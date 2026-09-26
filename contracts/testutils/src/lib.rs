@@ -122,7 +122,7 @@ impl DeploymentBuilder {
 
         let accrual_id = env.register_contract(None, AccrualContract);
         let accrual = AccrualContractClient::new(&env, &accrual_id);
-        accrual.initialize(&admin, &self.points_per_amt);
+        accrual.initialize(&admin, &bot_nft_id, &self.points_per_amt);
 
         let marketplace_id = env.register_contract(None, MarketplaceContract);
         let marketplace = MarketplaceContractClient::new(&env, &marketplace_id);
@@ -151,7 +151,7 @@ pub fn deploy_all(env: Env) -> Deployment<'static> {
 
 pub fn register_user(env: &Env, registry: &Address, user: &Address, name: &str) {
     let registry = RegistryContractClient::new(env, registry);
-    let _ = registry.register(user, &String::from_str(env, name));
+    registry.register(user, &String::from_str(env, name));
 }
 
 pub fn deploy_bot_nft_with_registry(
@@ -179,7 +179,9 @@ pub fn deploy_bot_nft_with_registry(
 pub fn advance_ledger(env: &Env, ledgers: u32) {
     env.ledger().with_mut(|li| {
         li.sequence_number = li.sequence_number.saturating_add(ledgers);
-        li.timestamp = li.timestamp.saturating_add((ledgers as u64).saturating_mul(5));
+        li.timestamp = li
+            .timestamp
+            .saturating_add((ledgers as u64).saturating_mul(5));
     });
 }
 

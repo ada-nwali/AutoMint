@@ -1,46 +1,126 @@
 "use client";
 
 import { useWallet } from "@/hooks/useWallet";
-import { useRegistered, useProfile, useBots, useAccrualState, useClaim, useAmtBalance } from "@/hooks/useAccrual";
+import {
+  useRegistered,
+  useProfile,
+  useBots,
+  useAccrualState,
+  useClaim,
+  useAmtBalance,
+  useAmtDecimals,
+} from "@/hooks/useAccrual";
 import { useAllBotDetails } from "@/hooks/useBotDetails";
-import { getPendingPoints } from "@/lib/contracts";
+import { getPendingPoints, bumpUserBots } from "@/lib/contracts";
 import { useState, useEffect } from "react";
+import { Skeleton } from "@/components/ui/Skeleton";
 import { PointsCounter } from "@/components/dashboard/PointsCounter";
 import ClaimButton from "@/components/dashboard/ClaimButton";
 import BotCard from "@/components/dashboard/BotCard";
 import RegistrationBanner from "@/components/dashboard/RegistrationBanner";
 import UpgradePrompt from "@/components/dashboard/UpgradePrompt";
-import { BotCardSkeleton } from "@/components/ui/Skeleton";
+import { ErrorState } from "@/components/ui/ErrorState";
 import { Wallet, Loader2, Bot } from "lucide-react";
 import clsx from "clsx";
 import type { BotNFT } from "@/types";
+import { useReduceMotion } from "@/hooks/useReduceMotion";
 
 export default function DashboardPage() {
   const { publicKey, isConnected, connect, isConnecting } = useWallet();
-  const { data: isRegistered, isLoading: isCheckingRegistration } = useRegistered();
-  const { data: profile } = useProfile();
-  const { data: botIds } = useBots();
-  const { data: accrualState } = useAccrualState();
-  const { data: bots } = useAllBotDetails(botIds || []);
-  const { data: amtBalance } = useAmtBalance();
+  const {
+    data: isRegistered,
+    isLoading: isCheckingRegistration,
+    isError: isRegError,
+    error: regError,
+    refetch: refetchReg,
+    isRefetching: isRegRefetching,
+  } = useRegistered();
+
+  const {
+    data: profile,
+    isError: isProfileError,
+    error: profileError,
+    refetch: refetchProfile,
+    isRefetching: isProfileRefetching,
+  } = useProfile();
+
+  const {
+    data: botIds,
+    isError: isBotsError,
+    error: botsError,
+    refetch: refetchBots,
+    isRefetching: isBotsRefetching,
+  } = useBots();
+
+  const {
+    data: accrualState,
+    isError: isAccrualError,
+    error: accrualError,
+    refetch: refetchAccrual,
+    isRefetching: isAccrualRefetching,
+  } = useAccrualState();
+
+  const {
+    data: bots,
+    isError: isBotsDetailsError,
+    error: botsDetailsError,
+    refetch: refetchBotsDetails,
+    isRefetching: isBotsDetailsRefetching,
+  } = useAllBotDetails(botIds || []);
+
+  const { data: amtBalance, isPending: isAmtBalancePending } = useAmtBalance();
+  const { data: amtDecimals } = useAmtDecimals();
   const claim = useClaim();
-  
+
   const [pendingPoints, setPendingPoints] = useState<bigint>(BigInt(0));
-  const [isLoadingPending, setIsLoadingPending] = useState(false);
+
+  const reduceMotion = useReduceMotion();
+
+  const isAnyError = isRegError || isProfileError || isBotsError || isAccrualError || isBotsDetailsError;
+  const activeError = regError || profileError || botsError || accrualError || botsDetailsError;
+  const isRetrying = isRegRefetching || isProfileRefetching || isBotsRefetching || isBotsDetailsRefetching;
+
+  // Check if any query is loading
+  const isLoading =
+    isCheckingRegistration ||
+    isProfileRefetching ||
+    isBotsRefetching ||
+    isBotsDetailsRefetching ||
+    isAccrualRefetching ||
+    isAmtBalancePending;
+
+  const handleRetryAll = () => {
+    refetchReg();
+    refetchProfile();
+    refetchBots();
+    refetchAccrual();
+    refetchBotsDetails();
+  };
 
   // Calculate total accrual rate from bots
-  const totalRate = bots?.reduce((sum: number, bot: { accrual_rate: bigint }) => sum + Number(bot.accrual_rate), 0) || 0;
+  const totalRate =
+    bots?.reduce(
+      (sum: number, bot: BotNFT) => sum + Number(bot.accrual_rate),
+      0,
+    ) || 0;
 
   // Fetch pending points when connected
   useEffect(() => {
     if (publicKey && isRegistered) {
-      setIsLoadingPending(true);
       getPendingPoints(publicKey)
         .then(setPendingPoints)
-        .catch(() => setPendingPoints(BigInt(0)))
-        .finally(() => setIsLoadingPending(false));
+        .catch(() => setPendingPoints(BigInt(0)));
     }
   }, [publicKey, isRegistered, accrualState]);
+
+  // Bump storage TTL for user's bots on dashboard load to prevent archival (#397)
+  useEffect(() => {
+    if (publicKey && botIds && botIds.length > 0) {
+      bumpUserBots(publicKey).catch(() => {
+        // Permissionless maintenance call; ignore simulation or network errors
+      });
+    }
+  }, [publicKey, botIds]);
 
   // Handle claim
   const handleClaim = () => {
@@ -73,7 +153,7 @@ export default function DashboardPage() {
               "text-sm font-medium text-gold border border-gold/30",
               "transition-all hover:bg-gold/20 hover:border-gold/50",
               "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
-              "disabled:cursor-not-allowed disabled:opacity-50"
+              "disabled:cursor-not-allowed disabled:opacity-50",
             )}
           >
             {isConnecting ? (
@@ -93,13 +173,71 @@ export default function DashboardPage() {
     );
   }
 
-  // Loading state
-  if (isCheckingRegistration) {
+  // Loading state - show skeletons while queries are in flight
+  if (isLoading) {
+    return (
+      <div
+        className="mx-auto max-w-7xl px-6 py-8"
+        role="status"
+        aria-busy="true"
+        aria-label="Loading dashboard"
+      >
+        <span className="sr-only">Loading dashboard...</span>
+
+        <div className="mb-8">
+          <Skeleton className="h-8 w-56" />
+          <Skeleton className="mt-3 h-4 w-72" />
+        </div>
+
+        <div className="grid gap-6 lg:grid-cols-2">
+          {/* Left column — points, claim, upgrade */}
+          <div className="flex flex-col gap-6">
+            <div className="rounded-2xl border border-liner bg-card p-5">
+              <div className="flex items-center gap-3">
+                <Skeleton className="h-11 w-11 rounded-xl" />
+                <div className="flex flex-col gap-2">
+                  <Skeleton className="h-4 w-28" />
+                  <Skeleton className="h-3 w-16" />
+                </div>
+              </div>
+              <Skeleton className="mt-4 h-7 w-48" />
+              <div className="mt-4 grid grid-cols-2 gap-3">
+                <Skeleton className="h-14 rounded-lg" />
+                <Skeleton className="h-14 rounded-lg" />
+              </div>
+              <Skeleton className="mt-4 h-10 w-full rounded-xl" />
+            </div>
+            <Skeleton className="h-24 w-full rounded-2xl" />
+          </div>
+
+          {/* Right column — bot grid */}
+          <div className="flex flex-col gap-6">
+            <div className="flex items-center justify-between">
+              <Skeleton className="h-6 w-32" />
+              <Skeleton className="h-4 w-20" />
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Skeleton className="h-48 w-full rounded-2xl" />
+              <Skeleton className="h-48 w-full rounded-2xl" />
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Error state for registration or initial query failures
+  if (isRegError) {
     return (
       <div className="mx-auto max-w-7xl px-6 py-8">
-        <div className="flex min-h-[400px] items-center justify-center rounded-2xl border border-liner bg-card p-12">
-          <Loader2 className="h-8 w-8 animate-spin text-muted" aria-hidden="true" />
-        </div>
+        <ErrorState
+          error={regError}
+          title="Failed to Load Account Status"
+          message="Could not verify your registration status with the Soroban registry contract."
+          onRetry={handleRetryAll}
+          isRetrying={isRetrying}
+          data-testid="dashboard-error-state"
+        />
       </div>
     );
   }
@@ -109,9 +247,7 @@ export default function DashboardPage() {
     return (
       <div className="mx-auto max-w-7xl px-6 py-8">
         <div className="max-w-xl">
-          <h1 className="font-display text-3xl font-bold text-text sm:text-4xl">
-            Dashboard
-          </h1>
+          <h1 className="font-display text-3xl font-bold text-text sm:text-4xl">Dashboard</h1>
           <p className="mt-2 text-sm text-muted">
             Manage your AI bot NFTs and track your earnings.
           </p>
@@ -123,7 +259,7 @@ export default function DashboardPage() {
     );
   }
 
-  // Registered state - show dashboard
+  // Registered state - show dashboard with error handling for sub-queries
   return (
     <div className="mx-auto max-w-7xl px-6 py-8">
       <div className="mb-8">
@@ -135,19 +271,34 @@ export default function DashboardPage() {
         </p>
       </div>
 
+      {isAnyError && (
+        <div className="mb-6">
+          <ErrorState
+            error={activeError}
+            title="Partial Data Outage"
+            message="Some dashboard metrics could not be synchronized with the Stellar network."
+            onRetry={handleRetryAll}
+            isRetrying={isRetrying}
+            compact
+            data-testid="dashboard-suberror-state"
+          />
+        </div>
+      )}
+
       <div className="grid gap-6 lg:grid-cols-2">
         {/* Left column */}
         <div className="flex flex-col gap-6">
           {/* Points Counter */}
           <PointsCounter
-            points={Number(profile?.points || BigInt(0))}
-            rate={totalRate}
-            bots={bots || []}
-            amtBalance={amtBalance ?? BigInt(0)}
+            points={isLoading ? 0 : Number(profile?.points || BigInt(0))}
+            rate={isLoading ? 0 : totalRate}
+            bots={isLoading ? [] : bots || []}
+            amtBalance={isLoading ? BigInt(0) : amtBalance ?? BigInt(0)}
+            amtDecimals={amtDecimals}
           />
 
           {/* Claim Button */}
-          {pendingPoints > BigInt(0) && (
+          {pendingPoints > BigInt(0) && !isLoading && (
             <ClaimButton
               pendingPoints={pendingPoints}
               onClaim={handleClaim}
@@ -162,15 +313,35 @@ export default function DashboardPage() {
         {/* Right column - Bot Grid */}
         <div className="flex flex-col gap-6">
           <div className="flex items-center justify-between">
-            <h2 className="font-display text-lg font-semibold text-text">
-              Your Bots
-            </h2>
-            <span className="text-sm text-muted">
-              {bots?.length || 0} owned
-            </span>
+            <h2 className="font-display text-lg font-semibold text-text">Your Bots</h2>
+            <span className="text-sm text-muted">{isLoading ? "loading..." : bots?.length || 0} owned</span>
           </div>
 
-          {bots && bots.length > 0 ? (
+          {isBotsError || isBotsDetailsError ? (
+            <ErrorState
+              error={botsError || botsDetailsError}
+              title="Failed to Load Bots"
+              message="Could not retrieve your NFT bots from the contract."
+              onRetry={() => {
+                refetchBots();
+                refetchBotsDetails();
+              }}
+              isRetrying={isBotsRefetching || isBotsDetailsRefetching}
+              compact
+              data-testid="bots-error-state"
+            />
+          ) : isLoading ? (
+            <div className="rounded-2xl border border-liner bg-card p-5">
+              <div className="flex items-center gap-3">
+                <Skeleton className="h-11 w-11 rounded-xl" />
+                <div className="flex flex-col gap-2">
+                  <Skeleton className="h-4 w-28" />
+                  <Skeleton className="h-3 w-16" />
+                </div>
+              </div>
+              <Skeleton className="mt-4 h-6 w-16 rounded-full" />
+            </div>
+          ) : bots && bots.length > 0 ? (
             <div className="grid gap-4 sm:grid-cols-2">
               {bots.map((bot: BotNFT) => (
                 <BotCard key={bot.id.toString()} bot={bot} />

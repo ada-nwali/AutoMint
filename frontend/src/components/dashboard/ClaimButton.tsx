@@ -3,6 +3,7 @@
 import { motion } from "framer-motion";
 import { Loader2, Coins } from "lucide-react";
 import clsx from "clsx";
+import { useWalletStore, selectNetworkMismatch } from "@/store/walletStore";
 
 interface ClaimButtonProps {
   pendingPoints: number | bigint;
@@ -12,7 +13,11 @@ interface ClaimButtonProps {
 
 export default function ClaimButton({ pendingPoints, onClaim, isClaiming }: ClaimButtonProps) {
   const points = typeof pendingPoints === "bigint" ? Number(pendingPoints) : pendingPoints;
-  const disabled = isClaiming || points <= 0;
+  // Claiming is a mutation: it stays disabled while Freighter is on the
+  // wrong network (#455). The runtime guard in executeTransaction is the
+  // backstop; this is the user-visible half.
+  const networkMismatch = useWalletStore(selectNetworkMismatch);
+  const disabled = isClaiming || points <= 0 || networkMismatch;
 
   return (
     <motion.div
@@ -40,6 +45,11 @@ export default function ClaimButton({ pendingPoints, onClaim, isClaiming }: Clai
         onClick={onClaim}
         disabled={disabled}
         aria-busy={isClaiming}
+        title={
+          networkMismatch && !isClaiming
+            ? "Freighter is on the wrong network — switch to Testnet to claim"
+            : undefined
+        }
         className={clsx(
           "flex min-h-11 items-center justify-center gap-2 rounded-xl border px-4 py-2.5 text-sm font-medium transition-all",
           "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
@@ -48,7 +58,12 @@ export default function ClaimButton({ pendingPoints, onClaim, isClaiming }: Clai
             : "border-gold/30 bg-gold/10 text-gold hover:bg-gold/20 hover:border-gold/50"
         )}
       >
-        {isClaiming ? (
+        {networkMismatch && !isClaiming ? (
+          <>
+            <Coins className="h-4 w-4" aria-hidden="true" />
+            Switch Network to Claim
+          </>
+        ) : isClaiming ? (
           <>
             <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
             Claiming...

@@ -17,6 +17,8 @@ pub enum DataKey {
     TotalUsers,
     Admin,
     Initialized,
+    // Authorized writer set (accrual + bot_nft) for #318 gating.
+    Writers,
 }
 
 // #39: Define UserProfile struct
@@ -29,6 +31,16 @@ pub struct UserProfile {
     pub claimed_amt: i128,
     pub registered_at: u64,
     pub bot_count: u32,
+}
+
+// #318: authorized writer set. The accrual contract may update points/claimed
+// amounts; the bot_nft contract may update bot counts. Off by default — if the
+// writers are never configured, the gated functions remain open (backward
+// compatible) so existing callers are unaffected until an admin locks them down.
+#[contracttype]
+pub struct Writers {
+    pub accrual: Address,
+    pub bot_nft: Address,
 }
 
 // #38: Define RegistryError enum
@@ -70,7 +82,7 @@ impl RegistryContract {
 
     pub fn register(env: Env, user: Address, username: String) -> Result<(), RegistryError> {
         user.require_auth();
-        
+
         // Check if user is already registered
         if env
             .storage()
@@ -79,12 +91,12 @@ impl RegistryContract {
         {
             return Err(RegistryError::AlreadyRegistered);
         }
-        
+
         // Validate username length (empty or too long)
         if username.is_empty() || username.len() > 32 {
             return Err(RegistryError::UsernameTaken);
         }
-        
+
         // Check for username uniqueness
         if env
             .storage()
@@ -93,7 +105,7 @@ impl RegistryContract {
         {
             return Err(RegistryError::UsernameTaken);
         }
-        
+
         // Create new user profile with initial values
         let profile = UserProfile {
             address: user.clone(),
@@ -103,24 +115,24 @@ impl RegistryContract {
             registered_at: env.ledger().timestamp(),
             bot_count: 0,
         };
-        
+
         // Store user profile
         env.storage()
             .persistent()
             .set(&DataKey::UserProfile(user.clone()), &profile);
-        
+
         // Store username mapping
         env.storage()
             .persistent()
             .set(&DataKey::Username(username), &user);
-        
+
         // Extend TTL for user profile
         env.storage().persistent().extend_ttl(
             &DataKey::UserProfile(user.clone()),
             LEDGER_THRESHOLD,
             LEDGER_BUMP,
         );
-        
+
         // Add user to the global user list
         let mut list: Vec<Address> = env
             .storage()
@@ -129,7 +141,7 @@ impl RegistryContract {
             .unwrap_or_else(|| Vec::new(&env));
         list.push_back(user.clone());
         env.storage().instance().set(&DataKey::UserList, &list);
-        
+
         // Increment total user counter
         let total: u32 = env
             .storage()
@@ -139,18 +151,18 @@ impl RegistryContract {
         env.storage()
             .instance()
             .set(&DataKey::TotalUsers, &(total + 1));
-        
+
         // Extend instance storage TTL
         env.storage()
             .instance()
             .extend_ttl(LEDGER_THRESHOLD, LEDGER_BUMP);
-        
+
         // Emit registration event
         env.events().publish(
             (symbol_short!("register"), user.clone()),
             env.ledger().timestamp(),
         );
-        
+
         Ok(())
     }
 
@@ -165,7 +177,55 @@ impl RegistryContract {
             .ok_or(RegistryError::NotRegistered)
     }
 
+    // #318: Configure the authorized writer set. Admin-only, idempotent. Off by
+    // default until called, then only the configured addresses may mutate gated
+    // fields.
+    pub fn set_writers(env: Env, accrual: Address, bot_nft: Address) -> Result<(), RegistryError> {
+        let admin = env
+            .storage()
+            .instance()
+            .get::<DataKey, Address>(&DataKey::Admin)
+            .ok_or(RegistryError::Unauthorized)?;
+        admin.require_auth();
+        env.events().publish(
+            (symbol_short!("writers"),),
+            (accrual.clone(), bot_nft.clone()),
+        );
+        env.storage()
+            .instance()
+            .set(&DataKey::Writers, &Writers { accrual, bot_nft });
+        Ok(())
+    }
+
+    pub fn get_writers(env: Env) -> Option<Writers> {
+        env.storage().instance().get(&DataKey::Writers)
+    }
+
+    fn require_accrual(env: &Env) -> Result<(), RegistryError> {
+        if let Some(writers) = env
+            .storage()
+            .instance()
+            .get::<DataKey, Writers>(&DataKey::Writers)
+        {
+            writers.accrual.require_auth();
+        }
+        Ok(())
+    }
+
+    fn require_bot_nft(env: &Env) -> Result<(), RegistryError> {
+        if let Some(writers) = env
+            .storage()
+            .instance()
+            .get::<DataKey, Writers>(&DataKey::Writers)
+        {
+            writers.bot_nft.require_auth();
+        }
+        Ok(())
+    }
+
     pub fn add_points(env: Env, user: Address, points: u64) -> Result<(), RegistryError> {
+        // #318: only the configured accrual writer may mutate points.
+        Self::require_accrual(&env)?;
         // SECURITY NOTE: This function modifies user state. It should only be called
         // from the accrual contract (which has already verified user authorization).
         // In a production deployment, consider validating caller identity.
@@ -192,6 +252,8 @@ impl RegistryContract {
     }
 
     pub fn increment_bot_count(env: Env, user: Address) -> Result<(), RegistryError> {
+        // #318: only the configured bot_nft writer may mutate bot counts.
+        Self::require_bot_nft(&env)?;
         // SECURITY NOTE: This function modifies user state. It should only be called
         // from the bot_nft contract (which has already verified user authorization).
         // In a production deployment, consider validating caller identity.
@@ -236,6 +298,8 @@ impl RegistryContract {
     }
 
     pub fn add_claimed_amt(env: Env, user: Address, amount: i128) -> Result<(), RegistryError> {
+        // #318: only the configured accrual writer may mutate claimed amounts.
+        Self::require_accrual(&env)?;
         // SECURITY NOTE: This function modifies user state. It should only be called
         // from the accrual contract (which has already verified user authorization).
         // In a production deployment, consider validating caller identity.
@@ -292,8 +356,8 @@ impl RegistryContract {
         }
         let take = limit.min(n) as usize;
         let mut result: Vec<UserProfile> = Vec::new(&env);
-        for i in 0..take {
-            result.push_back(profiles.get(i as u32).unwrap());
+        for p in profiles.iter().take(take) {
+            result.push_back(p);
         }
         result
     }
@@ -307,7 +371,7 @@ impl RegistryContract {
             .unwrap_or(0)
     }
 
-    pub fn admin(env: Env) -> Result<Address, RegistryError> {
+    pub fn get_admin(env: Env) -> Result<Address, RegistryError> {
         env.storage()
             .instance()
             .get(&DataKey::Admin)
@@ -321,7 +385,10 @@ extern crate std;
 #[cfg(test)]
 mod test {
     use super::*;
-    use soroban_sdk::{testutils::Address as _, Env, String};
+    use soroban_sdk::{
+        testutils::{Address as _, MockAuth, MockAuthInvoke},
+        Env, IntoVal, String,
+    };
 
     fn setup() -> (Env, Address, RegistryContractClient<'static>) {
         let env = Env::default();
@@ -330,7 +397,55 @@ mod test {
         let client = RegistryContractClient::new(&env, &id);
         let admin = Address::generate(&env);
         client.initialize(&admin);
+        // Configure writers so the gated path is exercised under mock_all_auths.
+        let accrual = Address::generate(&env);
+        let bot_nft = Address::generate(&env);
+        client.set_writers(&accrual, &bot_nft);
         (env, admin, client)
+    }
+
+    // #318: a non-writer (root caller) must be rejected by add_points.
+    #[test]
+    fn test_add_points_unauthorized_fails() {
+        let (env, _admin, client) = setup();
+        let user = Address::generate(&env);
+        client.register(&user, &String::from_str(&env, "Auth"));
+        env.mock_auths(&[]);
+        let result = client.try_add_points(&user, &10_u64);
+        assert!(result.is_err());
+    }
+
+    // #318: a non-writer (root caller) must be rejected by add_claimed_amt.
+    #[test]
+    fn test_add_claimed_amt_unauthorized_fails() {
+        let (env, _admin, client) = setup();
+        let user = Address::generate(&env);
+        client.register(&user, &String::from_str(&env, "Auth"));
+        env.mock_auths(&[]);
+        let result = client.try_add_claimed_amt(&user, &10_i128);
+        assert!(result.is_err());
+    }
+
+    // #318: the configured accrual writer succeeds (same authorization check the
+    // accrual contract hits when it calls add_points).
+    #[test]
+    fn test_add_points_by_writer_direct_succeeds() {
+        let (env, _admin, client) = setup();
+        let user = Address::generate(&env);
+        client.register(&user, &String::from_str(&env, "Auth"));
+        let registry_id = client.address.clone();
+        let writers = client.get_writers().unwrap();
+        env.mock_auths(&[MockAuth {
+            address: &writers.accrual,
+            invoke: &MockAuthInvoke {
+                contract: &registry_id,
+                fn_name: "add_points",
+                args: (user.clone(), 10_u64).into_val(&env),
+                sub_invokes: &[],
+            },
+        }]);
+        client.add_points(&user, &10_u64);
+        assert_eq!(client.get_user(&user).total_points, 10);
     }
 
     // #40: Test register success
@@ -519,7 +634,7 @@ mod test {
     #[test]
     fn test_admin_returns_current_admin() {
         let (_env, admin, client) = setup();
-        assert_eq!(client.admin(), admin);
+        assert_eq!(client.get_admin(), admin);
     }
 
     // Test double-initialization fails with the AlreadyInitialized variant
@@ -537,15 +652,15 @@ mod test {
     #[test]
     fn test_initialize_sets_admin() {
         let (_env, admin, client) = setup();
-        assert_eq!(client.admin(), admin);
+        assert_eq!(client.get_admin(), admin);
     }
 
     // #37: Test admin persists across calls
     #[test]
     fn test_admin_persists() {
         let (_env, admin, client) = setup();
-        let retrieved_admin1 = client.admin();
-        let retrieved_admin2 = client.admin();
+        let retrieved_admin1 = client.get_admin();
+        let retrieved_admin2 = client.get_admin();
         assert_eq!(retrieved_admin1, admin);
         assert_eq!(retrieved_admin2, admin);
         assert_eq!(retrieved_admin1, retrieved_admin2);
@@ -556,7 +671,7 @@ mod test {
         let env = Env::default();
         let id = env.register_contract(None, RegistryContract);
         let client = RegistryContractClient::new(&env, &id);
-        let result = client.try_admin();
+        let result = client.try_get_admin();
         assert_eq!(result, Err(Ok(RegistryError::NotInitialized)));
     }
 
@@ -730,10 +845,10 @@ mod test {
         let (env, _admin, client) = setup();
         let user = Address::generate(&env);
         let username = String::from_str(&env, "testuser");
-        
+
         client.register(&user, &username);
         let profile = client.get_user(&user);
-        
+
         assert_eq!(profile.address, user);
         assert_eq!(profile.username, username);
         assert_eq!(profile.total_points, 0);
@@ -747,11 +862,11 @@ mod test {
     fn test_register_increments_total_users() {
         let (env, _admin, client) = setup();
         let initial_count = client.total_users();
-        
+
         let user1 = Address::generate(&env);
         client.register(&user1, &String::from_str(&env, "user1"));
         assert_eq!(client.total_users(), initial_count + 1);
-        
+
         let user2 = Address::generate(&env);
         client.register(&user2, &String::from_str(&env, "user2"));
         assert_eq!(client.total_users(), initial_count + 2);
@@ -762,10 +877,10 @@ mod test {
         let (env, _admin, client) = setup();
         let user1 = Address::generate(&env);
         let user2 = Address::generate(&env);
-        
+
         client.register(&user1, &String::from_str(&env, "TestUser"));
         client.register(&user2, &String::from_str(&env, "testuser"));
-        
+
         // Both should succeed since usernames are case-sensitive
         let profile1 = client.get_user(&user1);
         let profile2 = client.get_user(&user2);
@@ -1002,9 +1117,8 @@ mod test {
 
         automint_testutils::advance_past_ttl(&env, LEDGER_BUMP);
 
-        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            client.get_user(&user)
-        }));
+        let outcome =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| client.get_user(&user)));
         assert!(outcome.is_err(), "expected archived entry access to fail");
     }
 

@@ -8,33 +8,35 @@ import {
   useListBot,
   useCancelListing,
 } from '../hooks/useMarketplace';
-import {
-  buyBot,
-  mintTierBot,
-  getActiveListings,
-  getUserListings,
-  listBot,
-  cancelListing,
-} from '@/lib/contracts';
+import { getActiveListings, getUserListings } from '@/lib/contracts';
+import { executeTransaction } from '@/lib/transaction';
 import { useWalletStore } from '@/store/walletStore';
 import { toast } from 'sonner';
+import type { MarketplaceListing } from '@/types';
 
 // Mock dependencies
 jest.mock('@/lib/contracts');
-jest.mock('@/store/walletStore');
+jest.mock('@/lib/transaction', () => ({
+  executeTransaction: jest.fn(),
+}));
+jest.mock('@/store/walletStore', () => ({
+  ...jest.requireActual('@/store/walletStore'),
+  useWalletStore: jest.fn(),
+}));
 jest.mock('sonner');
 
-const mockBuyBot = buyBot as jest.MockedFunction<typeof buyBot>;
-const mockMintTierBot = mintTierBot as jest.MockedFunction<typeof mintTierBot>;
 const mockGetActiveListings = getActiveListings as jest.MockedFunction<typeof getActiveListings>;
 const mockGetUserListings = getUserListings as jest.MockedFunction<typeof getUserListings>;
-const mockListBot = listBot as jest.MockedFunction<typeof listBot>;
-const mockCancelListing = cancelListing as jest.MockedFunction<typeof cancelListing>;
+const mockExecuteTransaction = executeTransaction as jest.MockedFunction<
+  typeof executeTransaction
+>;
 const mockUseWalletStore = useWalletStore as jest.MockedFunction<typeof useWalletStore>;
 
 describe('useMarketplace Hooks', () => {
   let queryClient: QueryClient;
-  const mockPublicKey = 'GABC123456';
+  // A structurally valid ed25519 public key — nativeToScVal(..., {type:
+  // "address"}) rejects placeholder strings like "GABC123456".
+  const mockPublicKey = 'GD6VCGW7N4YUZUG2VKRN4DKIXGTBJZTZBV5ICATW2YCDCOS36VYPXAR3';
 
   beforeEach(() => {
     queryClient = new QueryClient({
@@ -49,6 +51,12 @@ describe('useMarketplace Hooks', () => {
     (mockUseWalletStore as unknown as jest.Mock).mockImplementation((selector) =>
       selector({ publicKey: mockPublicKey })
     );
+
+    // Every transaction "confirms" immediately unless a test overrides it.
+    mockExecuteTransaction.mockImplementation(async (opts) => {
+      opts.onStatus({ stage: 'success', explorerUrl: 'https://explorer.test/tx/1' });
+      return 'ok';
+    });
   });
 
   const wrapper = ({ children }: { children: React.ReactNode }) => (
@@ -57,34 +65,43 @@ describe('useMarketplace Hooks', () => {
 
   describe('useBuyBot', () => {
     it('should successfully purchase a bot', async () => {
-      mockBuyBot.mockResolvedValue('tx_hash');
-
       const { result } = renderHook(() => useBuyBot(), { wrapper });
 
       act(() => {
-        result.current.mutate(1);
+        result.current.mutate(1n);
       });
 
       await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
-      expect(mockBuyBot).toHaveBeenCalledWith(mockPublicKey, 1);
-      expect(toast.success).toHaveBeenCalledWith('Bot purchased successfully!');
+      expect(mockExecuteTransaction).toHaveBeenCalledTimes(1);
+      const call = mockExecuteTransaction.mock.calls[0][0];
+      expect(call.method).toBe('buy_bot');
+      expect(call.sourceAddress).toBe(mockPublicKey);
+      expect(toast.success).toHaveBeenCalledWith(
+        'Bot purchased successfully!',
+        expect.objectContaining({ id: 'buy_bot' })
+      );
     });
 
     it('should handle error when purchasing bot fails', async () => {
       const error = new Error('Insufficient funds');
-      mockBuyBot.mockRejectedValue(error);
+      mockExecuteTransaction.mockImplementation((opts) => {
+        opts.onStatus({ stage: 'error', error: 'Insufficient funds' });
+        return Promise.reject(error);
+      });
 
       const { result } = renderHook(() => useBuyBot(), { wrapper });
 
       act(() => {
-        result.current.mutate(1);
+        result.current.mutate(1n);
       });
 
       await waitFor(() => expect(result.current.isError).toBe(true));
 
       expect(result.current.error).toEqual(error);
-      expect(toast.error).toHaveBeenCalledWith('Insufficient funds');
+      expect(toast.error).toHaveBeenCalledWith('Purchase failed: Insufficient funds', {
+        id: 'buy_bot',
+      });
     });
 
     it('should throw error when wallet not connected', async () => {
@@ -95,44 +112,55 @@ describe('useMarketplace Hooks', () => {
       const { result } = renderHook(() => useBuyBot(), { wrapper });
 
       act(() => {
-        result.current.mutate(1);
+        result.current.mutate(1n);
       });
 
       await waitFor(() => expect(result.current.isError).toBe(true));
 
       expect(result.current.error).toEqual(new Error('Wallet not connected'));
+      expect(mockExecuteTransaction).not.toHaveBeenCalled();
     });
   });
 
   describe('useMintTierBot', () => {
     it('should successfully mint a tier bot', async () => {
-      mockMintTierBot.mockResolvedValue(1n);
-
       const { result } = renderHook(() => useMintTierBot(), { wrapper });
 
       act(() => {
-        result.current.mutate({ tier: 'Advanced', token: 'TOKEN_ADDRESS' });
+        result.current.mutate({ tier: 'Advanced', token: mockPublicKey });
       });
 
       await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
-      expect(mockMintTierBot).toHaveBeenCalledWith(mockPublicKey, 'Advanced', 'TOKEN_ADDRESS');
-      expect(toast.success).toHaveBeenCalledWith('Tier bot minted successfully!');
+      expect(mockExecuteTransaction).toHaveBeenCalledTimes(1);
+      const call = mockExecuteTransaction.mock.calls[0][0];
+      expect(call.method).toBe('mint_tier');
+      expect(call.sourceAddress).toBe(mockPublicKey);
+      expect(toast.success).toHaveBeenCalledWith(
+        'Tier bot minted successfully!',
+        expect.objectContaining({ id: 'mint_tier' })
+      );
     });
 
     it('should handle error when minting fails', async () => {
       const error = new Error('Minting failed');
-      mockMintTierBot.mockRejectedValue(error);
+      mockExecuteTransaction.mockImplementation((opts) => {
+        opts.onStatus({ stage: 'error', error: 'Minting failed' });
+        return Promise.reject(error);
+      });
 
       const { result } = renderHook(() => useMintTierBot(), { wrapper });
 
       act(() => {
-        result.current.mutate({ tier: 'Premium', token: 'TOKEN_ADDRESS' });
+        result.current.mutate({ tier: 'Premium', token: mockPublicKey });
       });
 
       await waitFor(() => expect(result.current.isError).toBe(true));
 
-      expect(toast.error).toHaveBeenCalledWith('Minting failed');
+      expect(result.current.error).toEqual(error);
+      expect(toast.error).toHaveBeenCalledWith('Mint failed: Minting failed', {
+        id: 'mint_tier',
+      });
     });
   });
 
@@ -147,9 +175,9 @@ describe('useMarketplace Hooks', () => {
     });
 
     it('should successfully fetch active listings', async () => {
-      const mockListings = [
-        { id: 1n, seller: 'SELLER1', botId: 1n, price: 100n, isActive: true },
-        { id: 2n, seller: 'SELLER2', botId: 2n, price: 200n, isActive: true },
+      const mockListings: MarketplaceListing[] = [
+        { id: 1n, seller: 'SELLER1', bot_id: 1n, bot_tier: 'Basic', price: 100n, currency: 'CCUR', listed_at: 1n, active: true },
+        { id: 2n, seller: 'SELLER2', bot_id: 2n, bot_tier: 'Gold', price: 200n, currency: 'CCUR', listed_at: 2n, active: true },
       ];
 
       mockGetActiveListings.mockResolvedValue(mockListings);
@@ -175,8 +203,8 @@ describe('useMarketplace Hooks', () => {
 
   describe('useMyListings', () => {
     it('should fetch user listings when wallet connected', async () => {
-      const mockListings = [
-        { id: 1n, seller: mockPublicKey, botId: 1n, price: 100n, isActive: true },
+      const mockListings: MarketplaceListing[] = [
+        { id: 1n, seller: mockPublicKey, bot_id: 1n, bot_tier: 'Basic', price: 100n, currency: 'CCUR', listed_at: 1n, active: true },
       ];
 
       mockGetUserListings.mockResolvedValue(mockListings);
@@ -197,13 +225,12 @@ describe('useMarketplace Hooks', () => {
       const { result } = renderHook(() => useMyListings(), { wrapper });
 
       expect(result.current.data).toBeUndefined();
+      expect(mockGetUserListings).not.toHaveBeenCalled();
     });
   });
 
   describe('useListBot', () => {
     it('should successfully list a bot', async () => {
-      mockListBot.mockResolvedValue(1n);
-
       const { result } = renderHook(() => useListBot(), { wrapper });
 
       act(() => {
@@ -212,13 +239,22 @@ describe('useMarketplace Hooks', () => {
 
       await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
-      expect(mockListBot).toHaveBeenCalledWith(mockPublicKey, 1n, 500n);
-      expect(toast.success).toHaveBeenCalledWith('Bot listed successfully!');
+      expect(mockExecuteTransaction).toHaveBeenCalledTimes(1);
+      const call = mockExecuteTransaction.mock.calls[0][0];
+      expect(call.method).toBe('list_bot');
+      expect(call.sourceAddress).toBe(mockPublicKey);
+      expect(toast.success).toHaveBeenCalledWith(
+        'Bot listed successfully!',
+        expect.objectContaining({ id: 'list_bot' })
+      );
     });
 
     it('should handle error when listing fails', async () => {
       const error = new Error('Listing failed');
-      mockListBot.mockRejectedValue(error);
+      mockExecuteTransaction.mockImplementation((opts) => {
+        opts.onStatus({ stage: 'error', error: 'Listing failed' });
+        return Promise.reject(error);
+      });
 
       const { result } = renderHook(() => useListBot(), { wrapper });
 
@@ -228,14 +264,15 @@ describe('useMarketplace Hooks', () => {
 
       await waitFor(() => expect(result.current.isError).toBe(true));
 
-      expect(toast.error).toHaveBeenCalledWith('Listing failed');
+      expect(result.current.error).toEqual(error);
+      expect(toast.error).toHaveBeenCalledWith('Listing failed: Listing failed', {
+        id: 'list_bot',
+      });
     });
   });
 
   describe('useCancelListing', () => {
     it('should successfully cancel a listing', async () => {
-      mockCancelListing.mockResolvedValue('tx_hash');
-
       const { result } = renderHook(() => useCancelListing(), { wrapper });
 
       act(() => {
@@ -244,13 +281,22 @@ describe('useMarketplace Hooks', () => {
 
       await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
-      expect(mockCancelListing).toHaveBeenCalledWith(mockPublicKey, 1n);
-      expect(toast.success).toHaveBeenCalledWith('Listing cancelled successfully!');
+      expect(mockExecuteTransaction).toHaveBeenCalledTimes(1);
+      const call = mockExecuteTransaction.mock.calls[0][0];
+      expect(call.method).toBe('cancel_listing');
+      expect(call.sourceAddress).toBe(mockPublicKey);
+      expect(toast.success).toHaveBeenCalledWith(
+        'Listing cancelled successfully!',
+        expect.objectContaining({ id: 'cancel_listing' })
+      );
     });
 
     it('should handle error when canceling fails', async () => {
       const error = new Error('Cancel failed');
-      mockCancelListing.mockRejectedValue(error);
+      mockExecuteTransaction.mockImplementation((opts) => {
+        opts.onStatus({ stage: 'error', error: 'Cancel failed' });
+        return Promise.reject(error);
+      });
 
       const { result } = renderHook(() => useCancelListing(), { wrapper });
 
@@ -260,7 +306,10 @@ describe('useMarketplace Hooks', () => {
 
       await waitFor(() => expect(result.current.isError).toBe(true));
 
-      expect(toast.error).toHaveBeenCalledWith('Cancel failed');
+      expect(result.current.error).toEqual(error);
+      expect(toast.error).toHaveBeenCalledWith('Cancellation failed: Cancel failed', {
+        id: 'cancel_listing',
+      });
     });
   });
 });

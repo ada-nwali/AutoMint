@@ -2,14 +2,25 @@
 
 #![no_std]
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, symbol_short, Address, Env,
+    contract, contractclient, contracterror, contractimpl, contracttype, symbol_short, Address, Env,
+    Vec,
 };
 
-#[derive(Clone)]
+/// The one bot_nft entry point accrual calls. Declared locally rather than
+/// depending on `automint-bot-nft`: linking a second contract crate alongside
+/// `automint-token` duplicates exported symbols (`admin`, `burn`, `transfer`)
+/// and breaks the wasm32v1-none build.
+#[contractclient(name = "BotNftClient")]
+pub trait BotNftInterface {
+    fn get_user_total_rate(env: Env, user: Address) -> u64;
+}
+
+#[derive(Clone, Debug, PartialEq)]
 #[contracttype]
 pub struct AccrualState {
     pub last_claim_ts: u64,
-    pub total_claimed_points: u64,
+    pub carry_points: u64,
+    pub lifetime_points: u64,
 }
 
 #[derive(Clone)]
@@ -18,14 +29,18 @@ pub enum DataKey {
     Config,
     Admin,
     Initialized,
+    BotNft,
     UserAccrual(Address),
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq)]
 #[contracttype]
 pub struct Config {
     pub points_per_amt: u64,
 }
+
+/// Most users a single `get_accrual_states` call accepts.
+pub const MAX_BATCH_USERS: u32 = 50;
 
 fn read_accrual_state(env: &Env, user: &Address) -> Option<AccrualState> {
     env.storage()
@@ -33,11 +48,10 @@ fn read_accrual_state(env: &Env, user: &Address) -> Option<AccrualState> {
         .get::<_, UserAccrual>(&DataKey::UserAccrual(user.clone()))
         .map(|a| AccrualState {
             last_claim_ts: a.last_claim_ts,
-            total_claimed_points: a.total_claimed_points,
+            carry_points: a.carry_points,
+            lifetime_points: a.lifetime_points,
         })
 }
-
-
 
 #[derive(Clone)]
 #[contracttype]
@@ -45,7 +59,8 @@ pub struct UserAccrual {
     pub user: Address,
     pub rate: u64,
     pub last_claim_ts: u64,
-    pub total_claimed_points: u64,
+    pub carry_points: u64,
+    pub lifetime_points: u64,
     pub started_at: u64,
 }
 
@@ -57,6 +72,37 @@ pub enum AccrualError {
     NotStarted = 3,
     Unauthorized = 4,
     NotInitialized = 5,
+    RegistryCallFailed = 6,
+    TokenMintFailed = 7,
+    InvalidConfig = 8,
+    NoBots = 9,
+    TooManyUsers = 10,
+}
+
+fn get_reg_err_code(
+    res: &Result<
+        Result<(), soroban_sdk::ConversionError>,
+        Result<automint_registry::RegistryError, soroban_sdk::InvokeError>,
+    >,
+) -> u32 {
+    match res {
+        Ok(Ok(())) => 0,
+        Err(Ok(e)) => *e as u32,
+        _ => 999,
+    }
+}
+
+fn get_token_err_code(
+    res: &Result<
+        Result<(), soroban_sdk::ConversionError>,
+        Result<automint_token::TokenError, soroban_sdk::InvokeError>,
+    >,
+) -> u32 {
+    match res {
+        Ok(Ok(())) => 0,
+        Err(Ok(e)) => *e as u32,
+        _ => 999,
+    }
 }
 
 const LEDGER_BUMP: u32 = 120960;
@@ -70,6 +116,7 @@ impl AccrualContract {
     pub fn initialize(
         env: Env,
         admin: Address,
+        bot_nft: Address,
         points_per_amt: u64,
     ) -> Result<(), AccrualError> {
         if env.storage().instance().has(&DataKey::Initialized) {
@@ -77,22 +124,19 @@ impl AccrualContract {
         }
 
         if points_per_amt == 0 {
-            return Err(AccrualError::Unauthorized);
+            return Err(AccrualError::InvalidConfig);
         }
 
         admin.require_auth();
 
-        env.storage()
-            .instance()
-            .set(&DataKey::Admin, &admin);
+        env.storage().instance().set(&DataKey::Admin, &admin);
+        env.storage().instance().set(&DataKey::BotNft, &bot_nft);
 
         env.storage()
             .instance()
             .set(&DataKey::Config, &Config { points_per_amt });
 
-        env.storage()
-            .instance()
-            .set(&DataKey::Initialized, &true);
+        env.storage().instance().set(&DataKey::Initialized, &true);
 
         env.storage()
             .instance()
@@ -101,7 +145,9 @@ impl AccrualContract {
         Ok(())
     }
 
-    pub fn start_accrual(env: Env, user: Address, rate: u64) -> Result<(), AccrualError> {
+    /// Starts accruing for `user` at the combined rate of the bots they own,
+    /// read from the bot_nft contract — never from the caller (#319).
+    pub fn start_accrual(env: Env, user: Address) -> Result<(), AccrualError> {
         user.require_auth();
         if env
             .storage()
@@ -110,11 +156,21 @@ impl AccrualContract {
         {
             return Err(AccrualError::AlreadyStarted);
         }
+        let bot_nft: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::BotNft)
+            .ok_or(AccrualError::NotInitialized)?;
+        let rate = BotNftClient::new(&env, &bot_nft).get_user_total_rate(&user);
+        if rate == 0 {
+            return Err(AccrualError::NoBots);
+        }
         let accrual = UserAccrual {
             user: user.clone(),
             rate,
             last_claim_ts: env.ledger().timestamp(),
-            total_claimed_points: 0,
+            carry_points: 0,
+            lifetime_points: 0,
             started_at: env.ledger().timestamp(),
         };
         env.storage()
@@ -138,12 +194,32 @@ impl AccrualContract {
             .persistent()
             .get(&DataKey::UserAccrual(user))
             .ok_or(AccrualError::NotStarted)?;
-        let elapsed = env.ledger().timestamp().saturating_sub(accrual.last_claim_ts) as u128;
+        let elapsed = env
+            .ledger()
+            .timestamp()
+            .saturating_sub(accrual.last_claim_ts) as u128;
         Ok(elapsed.saturating_mul(accrual.rate as u128) / 3600)
     }
 
     pub fn get_accrual_state(env: Env, user: Address) -> Option<AccrualState> {
         read_accrual_state(&env, &user)
+    }
+
+    /// Accrual states for up to `MAX_BATCH_USERS` users in one call, in the
+    /// same order as `users`. Addresses with no accrual record map to `None`.
+    /// Lets a leaderboard poll one simulation instead of one per row (#420).
+    pub fn get_accrual_states(
+        env: Env,
+        users: Vec<Address>,
+    ) -> Result<Vec<Option<AccrualState>>, AccrualError> {
+        if users.len() > MAX_BATCH_USERS {
+            return Err(AccrualError::TooManyUsers);
+        }
+        let mut states: Vec<Option<AccrualState>> = Vec::new(&env);
+        for user in users.iter() {
+            states.push_back(read_accrual_state(&env, &user));
+        }
+        Ok(states)
     }
 
     pub fn claim(
@@ -168,35 +244,51 @@ impl AccrualContract {
             .storage()
             .instance()
             .get(&DataKey::Config)
-            .ok_or(AccrualError::Unauthorized)?;
+            .ok_or(AccrualError::NotInitialized)?;
 
-        // Total redeemable points
-        let updated_points = accrual.total_claimed_points.saturating_add(pending);
+        // Total redeemable carry points
+        let updated_carry = accrual.carry_points.saturating_add(pending);
 
         // Number of AMT tokens to mint
-        let amt_to_mint = updated_points / config.points_per_amt;
+        let amt_to_mint = updated_carry / config.points_per_amt;
 
         // Carry forward only leftover points
-        let remaining_points = updated_points % config.points_per_amt;
+        let remaining_carry = updated_carry % config.points_per_amt;
+
+        // Lifetime points accumulation
+        let updated_lifetime = accrual.lifetime_points.saturating_add(pending);
 
         let reg_client = automint_registry::RegistryContractClient::new(&env, &registry);
 
-        reg_client
-            .add_points(&user, &pending);
+        let reg_res = reg_client.try_add_points(&user, &pending);
+        if reg_res.is_err() || matches!(&reg_res, Ok(Err(_))) {
+            let code = get_reg_err_code(&reg_res);
+            env.events()
+                .publish((symbol_short!("fail_reg"), user.clone()), code);
+            return Err(AccrualError::RegistryCallFailed);
+        }
 
         if amt_to_mint > 0 {
             let token_client = automint_token::AMTTokenClient::new(&env, &token_contract);
 
-            token_client
-                .mint(&user, &(amt_to_mint as i128));
+            let mint_res = token_client.try_mint(&user, &(amt_to_mint as i128));
+            if mint_res.is_err() || matches!(&mint_res, Ok(Err(_))) {
+                let code = get_token_err_code(&mint_res);
+                env.events()
+                    .publish((symbol_short!("fail_mint"), user.clone()), code);
+                return Err(AccrualError::TokenMintFailed);
+            }
 
-            reg_client
-                .add_claimed_amt(&user, &(amt_to_mint as i128));
+            let claimed_res = reg_client.try_add_claimed_amt(&user, &(amt_to_mint as i128));
+            if claimed_res.is_err() || matches!(&claimed_res, Ok(Err(_))) {
+                let code = get_reg_err_code(&claimed_res);
+                env.events()
+                    .publish((symbol_short!("fail_reg"), user.clone()), code);
+                return Err(AccrualError::RegistryCallFailed);
+            }
 
-            env.events().publish(
-                (symbol_short!("mint"), user.clone()),
-                amt_to_mint as i128,
-            );
+            env.events()
+                .publish((symbol_short!("mint"), user.clone()), amt_to_mint as i128);
         }
 
         // Persist state only after all external calls succeed
@@ -204,7 +296,8 @@ impl AccrualContract {
             user: accrual.user,
             rate: accrual.rate,
             last_claim_ts: current_ts,
-            total_claimed_points: remaining_points,
+            carry_points: remaining_carry,
+            lifetime_points: updated_lifetime,
             started_at: accrual.started_at,
         };
 
@@ -216,22 +309,19 @@ impl AccrualContract {
             LEDGER_THRESHOLD,
             LEDGER_BUMP,
         );
-        // #544: keep the contract instance itself alive on write activity
-        // too — mirrors `registry::register` and the analogous fixes in
-        // bot_nft::transfer and token::do_transfer/burn.
         env.storage()
             .instance()
             .extend_ttl(LEDGER_THRESHOLD, LEDGER_BUMP);
 
         env.events().publish(
             (symbol_short!("claim"), user),
-            (pending, remaining_points),
+            (pending, remaining_carry, updated_lifetime),
         );
 
         Ok(pending as i128)
     }
 
-    pub fn admin(env: Env) -> Address {
+    pub fn get_accrual_admin(env: Env) -> Address {
         env.storage().instance().get(&DataKey::Admin).unwrap()
     }
 
@@ -249,8 +339,13 @@ extern crate std;
 #[cfg(test)]
 mod test {
     use super::*;
+    use automint_bot_nft::{BotNFTContractClient, BotTier};
     use automint_testutils::{deploy_all, register_user};
     use soroban_sdk::{testutils::Address as _, testutils::Ledger, Env};
+
+    /// One hour in seconds. A Basic bot accrues 1 point per hour, so tests
+    /// advance time in whole hours to get whole points.
+    const HOUR: u64 = 3600;
 
     fn setup() -> (
         Env,
@@ -259,15 +354,38 @@ mod test {
         Address,
         AccrualContractClient<'static>,
     ) {
+        let (env, admin, registry, token, _bot_nft, client) = setup_with_bot_nft();
+        (env, admin, registry, token, client)
+    }
+
+    fn setup_with_bot_nft() -> (
+        Env,
+        Address,
+        Address,
+        Address,
+        BotNFTContractClient<'static>,
+        AccrualContractClient<'static>,
+    ) {
         let deployment = deploy_all(Env::default());
         let client = AccrualContractClient::new(&deployment.env, &deployment.accrual_id);
+        let bot_nft = BotNFTContractClient::new(&deployment.env, &deployment.bot_nft_id);
         (
             deployment.env,
             deployment.admin,
             deployment.registry_id,
             deployment.token_id,
+            bot_nft,
             client,
         )
+    }
+
+    /// Mints a free Basic bot (rate 1) for `user` and starts their accrual.
+    fn start_basic(env: &Env, client: &AccrualContractClient, user: &Address) {
+        let bot_nft_id: Address = env.as_contract(&client.address, || {
+            env.storage().instance().get(&DataKey::BotNft).unwrap()
+        });
+        BotNFTContractClient::new(env, &bot_nft_id).mint_basic(user);
+        client.start_accrual(user);
     }
 
     #[test]
@@ -280,7 +398,7 @@ mod test {
     #[test]
     fn test_double_initialize_fails() {
         let (_env, _admin, _registry, _token, client) = setup();
-        let result = client.try_initialize(&_admin, &100_u64);
+        let result = client.try_initialize(&_admin, &Address::generate(&_env), &100_u64);
         assert_eq!(result, Err(Ok(AccrualError::AlreadyInitialized)));
     }
 
@@ -291,15 +409,15 @@ mod test {
         let id = env.register_contract(None, AccrualContract);
         let client = AccrualContractClient::new(&env, &id);
         let admin = Address::generate(&env);
-        let result = client.try_initialize(&admin, &0_u64);
-        assert_eq!(result, Err(Ok(AccrualError::Unauthorized)));
+        let result = client.try_initialize(&admin, &Address::generate(&env), &0_u64);
+        assert_eq!(result, Err(Ok(AccrualError::InvalidConfig)));
     }
 
     #[test]
     fn test_start_accrual() {
         let (env, _admin, _registry, _token, client) = setup();
         let user = Address::generate(&env);
-        client.start_accrual(&user, &50_u64);
+        start_basic(&env, &client, &user);
         assert_eq!(client.pending_points(&user), 0);
     }
 
@@ -309,20 +427,20 @@ mod test {
         let user = Address::generate(&env);
         let start_ts = env.ledger().timestamp();
 
-        let result = client.try_start_accrual(&user, &50_u64);
-        assert!(result.is_ok());
+        start_basic(&env, &client, &user);
 
         let state = client.get_accrual_state(&user).unwrap();
         assert_eq!(state.last_claim_ts, start_ts);
-        assert_eq!(state.total_claimed_points, 0);
+        assert_eq!(state.carry_points, 0);
+        assert_eq!(state.lifetime_points, 0);
     }
 
     #[test]
     fn test_double_start_accrual_fails() {
         let (env, _admin, _registry, _token, client) = setup();
         let user = Address::generate(&env);
-        client.start_accrual(&user, &50_u64);
-        let result = client.try_start_accrual(&user, &50_u64);
+        start_basic(&env, &client, &user);
+        let result = client.try_start_accrual(&user);
         assert_eq!(result, Err(Ok(AccrualError::AlreadyStarted)));
     }
 
@@ -330,11 +448,11 @@ mod test {
     fn test_pending_points_calculation() {
         let (env, _admin, _registry, _token, client) = setup();
         let user = Address::generate(&env);
-        client.start_accrual(&user, &100_u64);
+        start_basic(&env, &client, &user);
 
         env.ledger().with_mut(|ledger| {
-            ledger.sequence_number = ledger.sequence_number + 100;
-            ledger.timestamp = ledger.timestamp + 500;
+            ledger.sequence_number += 100;
+            ledger.timestamp += 500 * HOUR;
         });
 
         let pending = client.pending_points(&user);
@@ -346,12 +464,11 @@ mod test {
         let (env, _admin, registry, token, client) = setup();
         let user = Address::generate(&env);
         register_user(&env, &registry, &user, "user1");
-        // Use low rate so total_points < points_per_amt (no mint triggered)
-        client.start_accrual(&user, &1_u64);
+        start_basic(&env, &client, &user);
 
         env.ledger().with_mut(|ledger| {
-            ledger.sequence_number = ledger.sequence_number + 10;
-            ledger.timestamp = ledger.timestamp + 50;
+            ledger.sequence_number += 10;
+            ledger.timestamp += 50 * HOUR;
         });
 
         let _pending = client.claim(&user, &token, &registry);
@@ -363,12 +480,12 @@ mod test {
         let (env, _admin, registry, token, client) = setup();
         let user = Address::generate(&env);
         register_user(&env, &registry, &user, "user1");
-        // rate=3600 means 1 point per second, so 50s = 50 points < 100 threshold
-        client.start_accrual(&user, &3600_u64);
+        // Basic bot = 1 point/hour, so 50h = 50 points < 100 threshold
+        start_basic(&env, &client, &user);
 
         env.ledger().with_mut(|ledger| {
-            ledger.sequence_number = ledger.sequence_number + 10;
-            ledger.timestamp = ledger.timestamp + 50;
+            ledger.sequence_number += 10;
+            ledger.timestamp += 50 * HOUR;
         });
 
         let pending = client.claim(&user, &token, &registry);
@@ -380,20 +497,20 @@ mod test {
         let (env, _admin, registry, token, client) = setup();
         let user = Address::generate(&env);
         register_user(&env, &registry, &user, "user1");
-        // rate=3600 means 1 point per second, stays below 100 threshold per claim
-        client.start_accrual(&user, &3600_u64);
+        // Basic bot = 1 point/hour, stays below 100 threshold per claim
+        start_basic(&env, &client, &user);
 
         env.ledger().with_mut(|ledger| {
-            ledger.sequence_number = ledger.sequence_number + 10;
-            ledger.timestamp = ledger.timestamp + 30;
+            ledger.sequence_number += 10;
+            ledger.timestamp += 30 * HOUR;
         });
 
         let pending = client.claim(&user, &token, &registry);
         assert_eq!(pending, 30);
 
         env.ledger().with_mut(|ledger| {
-            ledger.sequence_number = ledger.sequence_number + 10;
-            ledger.timestamp = ledger.timestamp + 30;
+            ledger.sequence_number += 10;
+            ledger.timestamp += 30 * HOUR;
         });
 
         let pending2 = client.claim(&user, &token, &registry);
@@ -412,9 +529,11 @@ mod test {
     fn test_pending_points_uses_hourly_rate() {
         let (env, _admin, _registry, _token, client) = setup();
         let user = Address::generate(&env);
-        // rate=3600 pts/hr, elapsed=3600s → exactly 3600 points
-        client.start_accrual(&user, &3600_u64);
-        env.ledger().with_mut(|l| { l.timestamp += 3600; });
+        // Basic bot = 1 pt/hr, elapsed=3600h → exactly 3600 points
+        start_basic(&env, &client, &user);
+        env.ledger().with_mut(|l| {
+            l.timestamp += 3600 * HOUR;
+        });
         assert_eq!(client.pending_points(&user), 3600);
     }
 
@@ -422,7 +541,7 @@ mod test {
     fn test_accrual_state_read() {
         let (env, _admin, _registry, _token, client) = setup();
         let user = Address::generate(&env);
-        client.start_accrual(&user, &100_u64);
+        start_basic(&env, &client, &user);
         // pending_points returns 0 at t=0 (no elapsed)
         assert_eq!(client.pending_points(&user), 0);
     }
@@ -439,27 +558,29 @@ mod test {
     fn test_get_accrual_state_returns_started_state() {
         let (env, _admin, _registry, _token, client) = setup();
         let user = Address::generate(&env);
-        client.start_accrual(&user, &100_u64);
+        start_basic(&env, &client, &user);
 
         let state = client.get_accrual_state(&user).unwrap();
         assert_eq!(state.last_claim_ts, env.ledger().timestamp());
-        assert_eq!(state.total_claimed_points, 0);
+        assert_eq!(state.carry_points, 0);
+        assert_eq!(state.lifetime_points, 0);
     }
 
     #[test]
     fn test_get_accrual_state_after_pending() {
         let (env, _admin, _registry, _token, client) = setup();
         let user = Address::generate(&env);
-        client.start_accrual(&user, &3600_u64);
+        start_basic(&env, &client, &user);
 
         // Advance time so pending_points > 0, but don't claim (avoids cross-contract auth)
         env.ledger().with_mut(|l| {
-            l.timestamp += 7200;
+            l.timestamp += 7200 * HOUR;
         });
 
         let state = client.get_accrual_state(&user).unwrap();
-        assert_eq!(state.total_claimed_points, 0);
-        assert_eq!(state.last_claim_ts, env.ledger().timestamp() - 7200);
+        assert_eq!(state.carry_points, 0);
+        assert_eq!(state.lifetime_points, 0);
+        assert_eq!(state.last_claim_ts, env.ledger().timestamp() - 7200 * HOUR);
         assert_eq!(client.pending_points(&user), 7200);
     }
 
@@ -468,14 +589,54 @@ mod test {
         let (env, _admin, _registry, _token, client) = setup();
         let u1 = Address::generate(&env);
         let u2 = Address::generate(&env);
-        client.start_accrual(&u1, &100_u64);
-        client.start_accrual(&u2, &200_u64);
+        start_basic(&env, &client, &u1);
+        start_basic(&env, &client, &u2);
 
         let s1 = client.get_accrual_state(&u1).unwrap();
         let s2 = client.get_accrual_state(&u2).unwrap();
-        assert_eq!(s1.total_claimed_points, 0);
-        assert_eq!(s2.total_claimed_points, 0);
+        assert_eq!(s1.carry_points, 0);
+        assert_eq!(s1.lifetime_points, 0);
+        assert_eq!(s2.carry_points, 0);
+        assert_eq!(s2.lifetime_points, 0);
         assert!(client.get_accrual_state(&Address::generate(&env)).is_none());
+    }
+
+    #[test]
+    fn test_get_accrual_states_returns_one_entry_per_user_in_order() {
+        let (env, _admin, _registry, _token, client) = setup();
+        let started = Address::generate(&env);
+        let unknown = Address::generate(&env);
+        start_basic(&env, &client, &started);
+
+        let users = soroban_sdk::vec![&env, unknown.clone(), started.clone()];
+        let states = client.get_accrual_states(&users);
+
+        assert_eq!(states.len(), 2);
+        assert!(states.get(0).unwrap().is_none());
+        assert!(states.get(1).unwrap().is_some());
+    }
+
+    #[test]
+    fn test_get_accrual_states_rejects_more_than_the_cap() {
+        let (env, _admin, _registry, _token, client) = setup();
+        let mut users: Vec<Address> = Vec::new(&env);
+        for _ in 0..(MAX_BATCH_USERS + 1) {
+            users.push_back(Address::generate(&env));
+        }
+        assert_eq!(
+            client.try_get_accrual_states(&users),
+            Err(Ok(AccrualError::TooManyUsers))
+        );
+    }
+
+    #[test]
+    fn test_get_accrual_states_accepts_exactly_the_cap() {
+        let (env, _admin, _registry, _token, client) = setup();
+        let mut users: Vec<Address> = Vec::new(&env);
+        for _ in 0..MAX_BATCH_USERS {
+            users.push_back(Address::generate(&env));
+        }
+        assert_eq!(client.get_accrual_states(&users).len(), MAX_BATCH_USERS);
     }
 
     #[test]
@@ -483,7 +644,7 @@ mod test {
         let (env, _admin, registry, token, client) = setup();
         let user = Address::generate(&env);
         register_user(&env, &registry, &user, "zeroelapsed");
-        client.start_accrual(&user, &100_u64);
+        start_basic(&env, &client, &user);
         let pending = client.claim(&user, &token, &registry);
         assert_eq!(pending, 0);
     }
@@ -493,10 +654,10 @@ mod test {
         let (env, _admin, registry, token, client) = setup();
         let user = Address::generate(&env);
         register_user(&env, &registry, &user, "noelapsed");
-        client.start_accrual(&user, &100_u64);
+        start_basic(&env, &client, &user);
 
         env.ledger().with_mut(|l| {
-            l.timestamp += 100;
+            l.timestamp += 100 * HOUR;
         });
         let _ = client.claim(&user, &token, &registry);
         let pending2 = client.claim(&user, &token, &registry);
@@ -512,13 +673,37 @@ mod test {
     }
 
     #[test]
-    fn test_start_accrual_with_zero_rate() {
+    fn test_start_accrual_without_bots_fails() {
         let (env, _admin, _registry, _token, client) = setup();
         let user = Address::generate(&env);
-        client.start_accrual(&user, &0_u64);
+        let result = client.try_start_accrual(&user);
+        assert_eq!(result, Err(Ok(AccrualError::NoBots)));
+        assert!(client.get_accrual_state(&user).is_none());
+    }
 
-        env.ledger().with_mut(|l| { l.timestamp += 3600; });
-        assert_eq!(client.pending_points(&user), 0);
+    #[test]
+    fn test_start_accrual_basic_bot_rate_is_one() {
+        let (env, _admin, _registry, _token, client) = setup();
+        let user = Address::generate(&env);
+        start_basic(&env, &client, &user);
+
+        env.ledger().with_mut(|l| l.timestamp += HOUR);
+        assert_eq!(client.pending_points(&user), 1);
+    }
+
+    #[test]
+    fn test_start_accrual_basic_plus_gold_rate() {
+        let (env, _admin, _registry, _token, bot_nft, client) = setup_with_bot_nft();
+        let user = Address::generate(&env);
+        bot_nft.mint_basic(&user);
+        let gold = bot_nft.get_bot(&bot_nft.admin_mint(&user, &BotTier::Gold));
+        client.start_accrual(&user);
+
+        // Basic (1) + Gold (100 plus a 0-5% rarity bonus) = 101..=106.
+        let expected = 1 + gold.accrual_rate;
+        assert!((101..=106).contains(&expected));
+        env.ledger().with_mut(|l| l.timestamp += HOUR);
+        assert_eq!(client.pending_points(&user), expected as u128);
     }
 
     #[test]
@@ -533,7 +718,7 @@ mod test {
     fn test_pending_points_zero_elapsed() {
         let (env, _admin, _registry, _token, client) = setup();
         let user = Address::generate(&env);
-        client.start_accrual(&user, &100_u64);
+        start_basic(&env, &client, &user);
         assert_eq!(client.pending_points(&user), 0);
     }
 
@@ -541,9 +726,11 @@ mod test {
     fn test_pending_points_correct_calculation() {
         let (env, _admin, _registry, _token, client) = setup();
         let user = Address::generate(&env);
-        client.start_accrual(&user, &3600_u64);
+        start_basic(&env, &client, &user);
 
-        env.ledger().with_mut(|l| { l.timestamp += 1800; });
+        env.ledger().with_mut(|l| {
+            l.timestamp += 1800 * HOUR;
+        });
 
         assert_eq!(client.pending_points(&user), 1800);
     }
@@ -562,7 +749,34 @@ mod test {
         let id = env.register_contract(None, AccrualContract);
         let client = AccrualContractClient::new(&env, &id);
         let result = client.try_config();
-        assert!(matches!(result, Err(Ok(AccrualError::NotInitialized))));
+        assert_eq!(result, Err(Ok(AccrualError::NotInitialized)));
+    }
+
+    #[test]
+    fn test_claim_missing_config_fails_with_not_initialized() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let id = env.register_contract(None, AccrualContract);
+        let client = AccrualContractClient::new(&env, &id);
+        let user = Address::generate(&env);
+        let token = Address::generate(&env);
+        let registry = Address::generate(&env);
+        // start_accrual needs an initialized contract, so seed the entry directly.
+        env.as_contract(&id, || {
+            env.storage().persistent().set(
+                &DataKey::UserAccrual(user.clone()),
+                &UserAccrual {
+                    user: user.clone(),
+                    rate: 1,
+                    last_claim_ts: 0,
+                    carry_points: 0,
+                    lifetime_points: 0,
+                    started_at: 0,
+                },
+            );
+        });
+        let result = client.try_claim(&user, &token, &registry);
+        assert_eq!(result, Err(Ok(AccrualError::NotInitialized)));
     }
 
     #[test]
@@ -582,13 +796,13 @@ mod test {
         // Register user in registry
         register_user(&env, &registry, &user, "claimtest");
 
-        // Start accrual: rate=3600 pts/hr → 1 point per second
-        accrual.start_accrual(&user, &3600_u64);
+        // Start accrual with a Basic bot: 1 point per hour
+        start_basic(&env, &accrual, &user);
 
-        // Advance time by 3600 seconds → pending = 3600 points
+        // Advance time by 3600 hours → pending = 3600 points
         // With points_per_amt=100: amt_to_mint = 3600/100 = 36, remaining = 0
         env.ledger().with_mut(|l| {
-            l.timestamp += 3600;
+            l.timestamp += 3600 * HOUR;
             l.sequence_number += 1;
         });
 
@@ -609,11 +823,11 @@ mod test {
 
         register_user(&env, &registry, &user, "belowthresh");
 
-        // rate=3600 → 1 pt/sec, advance 50s → 50 points < 100 threshold
-        accrual.start_accrual(&user, &3600_u64);
+        // Basic bot → 1 pt/hr, advance 50h → 50 points < 100 threshold
+        start_basic(&env, &accrual, &user);
 
         env.ledger().with_mut(|l| {
-            l.timestamp += 50;
+            l.timestamp += 50 * HOUR;
             l.sequence_number += 1;
         });
 
@@ -635,22 +849,22 @@ mod test {
 
         register_user(&env, &registry, &user, "twice");
 
-        // rate=3600 → 1 pt/sec
-        accrual.start_accrual(&user, &3600_u64);
+        // Basic bot → 1 pt/hr
+        start_basic(&env, &accrual, &user);
 
-        // First claim: 80 seconds → 80 points (below threshold, no mint)
+        // First claim: 80 hours → 80 points (below threshold, no mint)
         env.ledger().with_mut(|l| {
-            l.timestamp += 80;
+            l.timestamp += 80 * HOUR;
             l.sequence_number += 1;
         });
         let pending1 = accrual.claim(&user, &token, &registry);
         assert_eq!(pending1, 80);
 
-        // Second claim: 120 more seconds → 120 points
+        // Second claim: 120 more hours → 120 points
         // Carry-forward from first claim: 80 % 100 = 80
         // updated_points = 80 + 120 = 200 → amt_to_mint = 200/100 = 2, remaining = 0
         env.ledger().with_mut(|l| {
-            l.timestamp += 120;
+            l.timestamp += 120 * HOUR;
             l.sequence_number += 1;
         });
         let pending2 = accrual.claim(&user, &token, &registry);
@@ -677,7 +891,7 @@ mod test {
     fn test_accrual_state_survives_before_ttl_expiry() {
         let (env, _admin, _registry, _token, client) = setup();
         let user = Address::generate(&env);
-        client.start_accrual(&user, &50_u64);
+        start_basic(&env, &client, &user);
 
         automint_testutils::advance_ledger(&env, LEDGER_BUMP / 2);
 
@@ -694,7 +908,7 @@ mod test {
     fn test_accrual_state_archived_after_ttl_expiry() {
         let (env, _admin, _registry, _token, client) = setup();
         let user = Address::generate(&env);
-        client.start_accrual(&user, &50_u64);
+        start_basic(&env, &client, &user);
 
         automint_testutils::advance_past_ttl(&env, LEDGER_BUMP);
 
@@ -720,16 +934,7 @@ mod test {
         let (env, _admin, registry, token, client) = setup();
         let user = Address::generate(&env);
         register_user(&env, &registry, &user, "ttluser");
-        // Rate 0 keeps pending points (and therefore amt_to_mint) at zero
-        // for the whole test, so `claim` never needs to cross-call the
-        // token contract's `mint` — that path requires nested admin auth
-        // that this test harness's `mock_all_auths()` doesn't satisfy for
-        // non-root invocations, which is an unrelated pre-existing gap
-        // (also hit by test_claim_twice_accumulates_registry_state and
-        // test_claim_updates_registry_total_points_and_claimed_amt). Using
-        // rate 0 isolates the TTL-renewal behaviour this test targets from
-        // that unrelated issue.
-        client.start_accrual(&user, &0_u64);
+        start_basic(&env, &client, &user);
 
         automint_testutils::advance_ledger(&env, LEDGER_BUMP - 1);
         client.claim(&user, &token, &registry);
@@ -738,6 +943,45 @@ mod test {
 
         let state = client.get_accrual_state(&user);
         assert!(state.is_some());
+    }
+
+    #[test]
+    fn test_claim_unregistered_user_returns_registry_call_failed() {
+        let (env, _admin, registry, token, client) = setup();
+        let user = Address::generate(&env);
+        // User starts accrual but is NOT registered in registry
+        start_basic(&env, &client, &user);
+        env.ledger().with_mut(|l| {
+            l.timestamp += 100 * HOUR;
+        });
+
+        let result = client.try_claim(&user, &token, &registry);
+        assert_eq!(result, Err(Ok(AccrualError::RegistryCallFailed)));
+    }
+
+    #[test]
+    fn test_three_claims_lifetime_and_carry_points() {
+        let (env, _admin, registry, token, client) = setup();
+        let user = Address::generate(&env);
+        register_user(&env, &registry, &user, "threeclaims");
+        // Basic bot → 1 point per hour
+        start_basic(&env, &client, &user);
+
+        // Claim 1: 100 hours → 100 points. (100 / 100 = 1 AMT, carry = 0, lifetime = 100)
+        env.ledger().with_mut(|l| l.timestamp += 100 * HOUR);
+        let _ = client.claim(&user, &token, &registry);
+
+        // Claim 2: 100 hours → 100 points. (100 / 100 = 1 AMT, carry = 0, lifetime = 200)
+        env.ledger().with_mut(|l| l.timestamp += 100 * HOUR);
+        let _ = client.claim(&user, &token, &registry);
+
+        // Claim 3: 50 hours → 50 points. (50 / 100 = 0 AMT, carry = 50, lifetime = 250)
+        env.ledger().with_mut(|l| l.timestamp += 50 * HOUR);
+        let _ = client.claim(&user, &token, &registry);
+
+        let state = client.get_accrual_state(&user).unwrap();
+        assert_eq!(state.lifetime_points, 250);
+        assert_eq!(state.carry_points, 50);
     }
 }
 
@@ -761,6 +1005,12 @@ mod auth_tests {
         client: AccrualContractClient<'static>,
         registry_id: Address,
         token_id: Address,
+        bot_nft_id: Address,
+    }
+
+    fn mint_basic(ctx: &Ctx, user: &Address) {
+        ctx.env.mock_all_auths();
+        automint_bot_nft::BotNFTContractClient::new(&ctx.env, &ctx.bot_nft_id).mint_basic(user);
     }
 
     fn setup() -> Ctx {
@@ -773,6 +1023,8 @@ mod auth_tests {
         let reg_client = automint_registry::RegistryContractClient::new(&env, &registry_id);
         let token_id = env.register_contract(None, automint_token::AMTToken);
         let token_client = automint_token::AMTTokenClient::new(&env, &token_id);
+        let bot_nft_id = env.register_contract(None, automint_bot_nft::BotNFTContract);
+        let bot_nft = automint_bot_nft::BotNFTContractClient::new(&env, &bot_nft_id);
 
         env.mock_all_auths();
         reg_client.initialize(&admin);
@@ -782,7 +1034,8 @@ mod auth_tests {
             &String::from_str(&env, "AutoMint Token"),
             &String::from_str(&env, "AMT"),
         );
-        client.initialize(&admin, &100_u64);
+        bot_nft.initialize(&admin, &registry_id);
+        client.initialize(&admin, &bot_nft_id, &100_u64);
 
         Ctx {
             env,
@@ -790,6 +1043,7 @@ mod auth_tests {
             client,
             registry_id,
             token_id,
+            bot_nft_id,
         }
     }
 
@@ -799,8 +1053,9 @@ mod auth_tests {
         let id = env.register_contract(None, AccrualContract);
         let client = AccrualContractClient::new(&env, &id);
         let admin = Address::generate(&env);
+        let bot_nft = Address::generate(&env);
 
-        let result = client.try_initialize(&admin, &100_u64);
+        let result = client.try_initialize(&admin, &bot_nft, &100_u64);
         assert!(result.is_err());
     }
 
@@ -810,17 +1065,18 @@ mod auth_tests {
         let id = env.register_contract(None, AccrualContract);
         let client = AccrualContractClient::new(&env, &id);
         let admin = Address::generate(&env);
+        let bot_nft = Address::generate(&env);
 
         env.mock_auths(&[MockAuth {
             address: &admin,
             invoke: &MockAuthInvoke {
                 contract: &id,
                 fn_name: "initialize",
-                args: (admin.clone(), 100_u64).into_val(&env),
+                args: (admin.clone(), bot_nft.clone(), 100_u64).into_val(&env),
                 sub_invokes: &[],
             },
         }]);
-        let result = client.try_initialize(&admin, &100_u64);
+        let result = client.try_initialize(&admin, &bot_nft, &100_u64);
         assert!(result.is_ok());
     }
 
@@ -828,9 +1084,10 @@ mod auth_tests {
     fn test_start_accrual_fails_without_user_auth() {
         let ctx = setup();
         let user = Address::generate(&ctx.env);
+        mint_basic(&ctx, &user);
 
         ctx.env.mock_auths(&[]);
-        let result = ctx.client.try_start_accrual(&user, &5_u64);
+        let result = ctx.client.try_start_accrual(&user);
         assert!(result.is_err());
     }
 
@@ -838,17 +1095,18 @@ mod auth_tests {
     fn test_start_accrual_succeeds_with_user_auth() {
         let ctx = setup();
         let user = Address::generate(&ctx.env);
+        mint_basic(&ctx, &user);
 
         ctx.env.mock_auths(&[MockAuth {
             address: &user,
             invoke: &MockAuthInvoke {
                 contract: &ctx.id,
                 fn_name: "start_accrual",
-                args: (user.clone(), 5_u64).into_val(&ctx.env),
+                args: (user.clone(),).into_val(&ctx.env),
                 sub_invokes: &[],
             },
         }]);
-        let result = ctx.client.try_start_accrual(&user, &5_u64);
+        let result = ctx.client.try_start_accrual(&user);
         assert!(result.is_ok());
     }
 
@@ -856,13 +1114,11 @@ mod auth_tests {
     fn test_claim_fails_without_user_auth() {
         let ctx = setup();
         let user = Address::generate(&ctx.env);
-        ctx.env.mock_all_auths();
-        ctx.client.start_accrual(&user, &5_u64);
+        mint_basic(&ctx, &user);
+        ctx.client.start_accrual(&user);
 
         ctx.env.mock_auths(&[]);
-        let result = ctx
-            .client
-            .try_claim(&user, &ctx.token_id, &ctx.registry_id);
+        let result = ctx.client.try_claim(&user, &ctx.token_id, &ctx.registry_id);
         assert!(result.is_err());
     }
 
@@ -873,7 +1129,8 @@ mod auth_tests {
         ctx.env.mock_all_auths();
         let registry = automint_registry::RegistryContractClient::new(&ctx.env, &ctx.registry_id);
         registry.register(&user, &String::from_str(&ctx.env, "claim-auth"));
-        ctx.client.start_accrual(&user, &5_u64);
+        mint_basic(&ctx, &user);
+        ctx.client.start_accrual(&user);
 
         ctx.env.mock_auths(&[MockAuth {
             address: &user,
@@ -885,9 +1142,7 @@ mod auth_tests {
                 sub_invokes: &[],
             },
         }]);
-        let result = ctx
-            .client
-            .try_claim(&user, &ctx.token_id, &ctx.registry_id);
+        let result = ctx.client.try_claim(&user, &ctx.token_id, &ctx.registry_id);
         assert!(result.is_ok());
     }
 }

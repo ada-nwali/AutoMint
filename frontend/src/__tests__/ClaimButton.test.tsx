@@ -2,6 +2,7 @@ import React from "react";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import ClaimButton from "../components/dashboard/ClaimButton";
+import { useWalletStore } from "../store/walletStore";
 
 jest.mock("framer-motion", () => ({
   motion: {
@@ -16,6 +17,11 @@ describe("ClaimButton", () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    useWalletStore.setState({ networkMismatch: false });
+  });
+
+  afterEach(() => {
+    useWalletStore.setState({ networkMismatch: false });
   });
 
   it("renders pending points with locale formatting", () => {
@@ -85,5 +91,38 @@ describe("ClaimButton", () => {
   it("renders Claim Rewards text when not claiming and Coins icon", () => {
     render(<ClaimButton pendingPoints={50} onClaim={mockOnClaim} isClaiming={false} />);
     expect(screen.getByText("Claim Rewards")).toBeInTheDocument();
+  });
+
+  describe("network mismatch (#455)", () => {
+    it("disables the button and prompts to switch networks", () => {
+      useWalletStore.setState({ networkMismatch: true });
+      render(<ClaimButton pendingPoints={500} onClaim={mockOnClaim} isClaiming={false} />);
+      const btn = screen.getByRole("button", { name: /Switch Network to Claim/i });
+      expect(btn).toBeDisabled();
+      expect(btn).toHaveAttribute(
+        "title",
+        expect.stringContaining("switch to Testnet")
+      );
+    });
+
+    it("does not fire onClaim while the wallet is on the wrong network", async () => {
+      useWalletStore.setState({ networkMismatch: true });
+      const user = userEvent.setup();
+      render(<ClaimButton pendingPoints={500} onClaim={mockOnClaim} isClaiming={false} />);
+      await user.click(screen.getByRole("button"));
+      expect(mockOnClaim).not.toHaveBeenCalled();
+    });
+
+    it("re-enables once the network matches again", () => {
+      useWalletStore.setState({ networkMismatch: true });
+      const { rerender } = render(
+        <ClaimButton pendingPoints={500} onClaim={mockOnClaim} isClaiming={false} />
+      );
+      expect(screen.getByRole("button")).toBeDisabled();
+
+      useWalletStore.setState({ networkMismatch: false });
+      rerender(<ClaimButton pendingPoints={500} onClaim={mockOnClaim} isClaiming={false} />);
+      expect(screen.getByRole("button", { name: /Claim Rewards/i })).toBeEnabled();
+    });
   });
 });

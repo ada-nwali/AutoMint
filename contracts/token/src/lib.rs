@@ -90,12 +90,10 @@ impl AMTToken {
     // correct answer for either, not an error.
     pub fn allowance(env: Env, from: Address, spender: Address) -> i128 {
         let key = DataKey::Allowance(AllowanceKey { from, spender });
-        if let Some(a) = env.storage().temporary().get::<_, AllowanceValue>(&key) {
-            if a.expiration_ledger >= env.ledger().sequence() {
-                return a.amount;
-            }
+        match env.storage().temporary().get::<_, AllowanceValue>(&key) {
+            Some(a) if a.expiration_ledger >= env.ledger().sequence() => a.amount,
+            _ => 0,
         }
-        0
     }
 
     pub fn approve(
@@ -197,23 +195,23 @@ impl AMTToken {
 
     pub fn burn(env: Env, from: Address, amount: i128) -> Result<(), TokenError> {
         from.require_auth();
-        
+
         // Validate amount is not negative
         if amount < 0 {
             return Err(TokenError::NegativeAmount);
         }
-        
+
         // Validate amount is not zero (burning zero is pointless)
         if amount == 0 {
             return Ok(()); // No-op for zero amount
         }
-        
+
         // Get current balance and validate it exists and is sufficient
         let balance = Self::balance(env.clone(), from.clone());
         if balance < amount {
             return Err(TokenError::InsufficientBalance);
         }
-        
+
         // Perform the burn
         env.storage()
             .persistent()
@@ -431,7 +429,10 @@ extern crate std;
 #[cfg(test)]
 mod test {
     use super::*;
-    use soroban_sdk::{testutils::{Address as _, Ledger as _}, Env, String};
+    use soroban_sdk::{
+        testutils::{Address as _, Ledger as _},
+        Env, String,
+    };
 
     fn setup() -> (Env, Address, AMTTokenClient<'static>) {
         let env = Env::default();
@@ -697,7 +698,12 @@ mod test {
         let alice = Address::generate(&env);
         let spender = Address::generate(&env);
         client.mint(&alice, &1000_i128);
-        client.approve(&alice, &spender, &300_i128, &(env.ledger().sequence() + 1000));
+        client.approve(
+            &alice,
+            &spender,
+            &300_i128,
+            &(env.ledger().sequence() + 1000),
+        );
         let new_admin = Address::generate(&env);
         client.set_admin(&new_admin);
         // Allowance must be untouched
@@ -733,7 +739,12 @@ mod test {
         let spender = Address::generate(&env);
         let bob = Address::generate(&env);
         client.mint(&alice, &1000_i128);
-        client.approve(&alice, &spender, &500_i128, &(env.ledger().sequence() + 1000));
+        client.approve(
+            &alice,
+            &spender,
+            &500_i128,
+            &(env.ledger().sequence() + 1000),
+        );
         client.transfer_from(&spender, &alice, &bob, &500_i128);
         assert_eq!(client.allowance(&alice, &spender), 0_i128);
         assert_eq!(client.balance(&bob), 500_i128);
@@ -769,7 +780,12 @@ mod test {
         let bob = Address::generate(&env);
         // Give alice only 50 but approve spender for 200
         client.mint(&alice, &50_i128);
-        client.approve(&alice, &spender, &200_i128, &(env.ledger().sequence() + 1000));
+        client.approve(
+            &alice,
+            &spender,
+            &200_i128,
+            &(env.ledger().sequence() + 1000),
+        );
         let result = client.try_transfer_from(&spender, &alice, &bob, &200_i128);
         assert_eq!(result, Err(Ok(TokenError::InsufficientBalance)));
     }
@@ -782,7 +798,12 @@ mod test {
         let spender = Address::generate(&env);
         let bob = Address::generate(&env);
         client.mint(&alice, &1000_i128);
-        client.approve(&alice, &spender, &500_i128, &(env.ledger().sequence() + 1000));
+        client.approve(
+            &alice,
+            &spender,
+            &500_i128,
+            &(env.ledger().sequence() + 1000),
+        );
         let allowance_before = client.allowance(&alice, &spender);
         let result = client.try_transfer_from(&spender, &alice, &bob, &-100_i128);
         assert_eq!(result, Err(Ok(TokenError::NegativeAmount)));
@@ -798,7 +819,12 @@ mod test {
         let spender = Address::generate(&env);
         let bob = Address::generate(&env);
         client.mint(&alice, &1000_i128);
-        client.approve(&alice, &spender, &500_i128, &(env.ledger().sequence() + 1000));
+        client.approve(
+            &alice,
+            &spender,
+            &500_i128,
+            &(env.ledger().sequence() + 1000),
+        );
         // Should succeed without consuming allowance or moving tokens
         client.transfer_from(&spender, &alice, &bob, &0_i128);
         assert_eq!(client.allowance(&alice, &spender), 500_i128);
@@ -825,7 +851,12 @@ mod test {
         let alice = Address::generate(&env);
         let spender = Address::generate(&env);
         client.mint(&alice, &1000_i128);
-        client.approve(&alice, &spender, &500_i128, &(env.ledger().sequence() + 1000));
+        client.approve(
+            &alice,
+            &spender,
+            &500_i128,
+            &(env.ledger().sequence() + 1000),
+        );
         let result = client.try_transfer_from(&spender, &alice, &alice, &100_i128);
         assert_eq!(result, Err(Ok(TokenError::Unauthorized)));
         // Allowance must be untouched
@@ -883,7 +914,12 @@ mod test {
         let spender = Address::generate(&env);
         let bob = Address::generate(&env);
         client.mint(&alice, &1000_i128);
-        client.approve(&alice, &spender, &300_i128, &(env.ledger().sequence() + 1000));
+        client.approve(
+            &alice,
+            &spender,
+            &300_i128,
+            &(env.ledger().sequence() + 1000),
+        );
         client.transfer_from(&spender, &alice, &bob, &100_i128);
         assert_eq!(client.allowance(&alice, &spender), 200_i128);
         client.transfer_from(&spender, &alice, &bob, &100_i128);
@@ -964,11 +1000,11 @@ mod test {
         let (env, _admin, client) = setup();
         let alice = Address::generate(&env);
         client.mint(&alice, &1000_i128);
-        
+
         let balance_before = client.balance(&alice);
         client.burn(&alice, &0_i128);
         let balance_after = client.balance(&alice);
-        
+
         assert_eq!(balance_before, balance_after);
         assert_eq!(balance_after, 1000_i128);
     }
@@ -978,7 +1014,7 @@ mod test {
         let (env, _admin, client) = setup();
         let alice = Address::generate(&env);
         client.mint(&alice, &1000_i128);
-        
+
         let result = client.try_burn(&alice, &-100_i128);
         assert_eq!(result, Err(Ok(TokenError::NegativeAmount)));
     }
@@ -988,7 +1024,7 @@ mod test {
         let (env, _admin, client) = setup();
         let alice = Address::generate(&env);
         client.mint(&alice, &1000_i128);
-        
+
         client.burn(&alice, &1000_i128);
         assert_eq!(client.balance(&alice), 0_i128);
     }
@@ -1201,7 +1237,12 @@ mod test {
         let alice = Address::generate(&env);
         let spender = Address::generate(&env);
         // from.require_auth() is mandatory in approve()
-        let result = client.try_approve(&alice, &spender, &100_i128, &(env.ledger().sequence() + 1000));
+        let result = client.try_approve(
+            &alice,
+            &spender,
+            &100_i128,
+            &(env.ledger().sequence() + 1000),
+        );
         // In mock mode this succeeds, but require_auth() is verified via code inspection
         assert!(result.is_ok());
     }
@@ -1224,7 +1265,12 @@ mod test {
         let spender = Address::generate(&env);
         let bob = Address::generate(&env);
         client.mint(&alice, &1000_i128);
-        client.approve(&alice, &spender, &500_i128, &(env.ledger().sequence() + 1000));
+        client.approve(
+            &alice,
+            &spender,
+            &500_i128,
+            &(env.ledger().sequence() + 1000),
+        );
         // spender.require_auth() is mandatory in transfer_from()
         let result = client.try_transfer_from(&spender, &alice, &bob, &100_i128);
         assert!(result.is_ok());
@@ -1296,7 +1342,12 @@ mod test {
         let bob = Address::generate(&env);
         client.mint(&alice, &i128::MAX);
         client.mint(&bob, &i128::MAX);
-        client.approve(&alice, &spender, &i128::MAX, &(env.ledger().sequence() + 10000));
+        client.approve(
+            &alice,
+            &spender,
+            &i128::MAX,
+            &(env.ledger().sequence() + 10000),
+        );
         // transfer_from would cause overflow in bob's balance
         let result = client.try_transfer_from(&spender, &alice, &bob, &1_i128);
         assert_eq!(result, Err(Ok(TokenError::Overflow)));
@@ -1362,7 +1413,12 @@ mod test {
         let spender = Address::generate(&env);
         let bob = Address::generate(&env);
         client.mint(&alice, &1000_i128);
-        client.approve(&alice, &spender, &500_i128, &(env.ledger().sequence() + 1000));
+        client.approve(
+            &alice,
+            &spender,
+            &500_i128,
+            &(env.ledger().sequence() + 1000),
+        );
         // Verify allowance before transfer
         assert_eq!(client.allowance(&alice, &spender), 500_i128);
         // transfer_from must atomically check allowance, decrement, and transfer
@@ -1619,8 +1675,7 @@ mod auth_tests {
         let bob = Address::generate(&ctx.env);
         ctx.env.mock_all_auths();
         ctx.client.mint(&alice, &1000_i128);
-        ctx.client
-            .approve(&alice, &spender, &500_i128, &1000_u32);
+        ctx.client.approve(&alice, &spender, &500_i128, &1000_u32);
 
         ctx.env.mock_auths(&[]);
         let result = ctx
@@ -1637,8 +1692,7 @@ mod auth_tests {
         let bob = Address::generate(&ctx.env);
         ctx.env.mock_all_auths();
         ctx.client.mint(&alice, &1000_i128);
-        ctx.client
-            .approve(&alice, &spender, &500_i128, &1000_u32);
+        ctx.client.approve(&alice, &spender, &500_i128, &1000_u32);
 
         ctx.env.mock_auths(&[MockAuth {
             address: &spender,
@@ -1743,4 +1797,3 @@ mod auth_tests {
         assert!(result.is_ok());
     }
 }
-

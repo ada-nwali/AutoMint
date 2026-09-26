@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { motion } from "framer-motion";
 import { Bot, ShoppingCart, X, Zap, Tag } from "lucide-react";
 import clsx from "clsx";
@@ -9,9 +10,10 @@ import {
   BOT_TIER_COLORS,
   BOT_TIER_BG_COLORS,
   TIER_META,
-  stroopsToXlm,
 } from "@/types";
 import type { MarketplaceListing, BotNFT } from "@/types";
+import { stroopsToXlm } from "@/lib/format";
+import ConfirmDialog from "@/components/ui/ConfirmDialog";
 
 interface BotListingCardProps {
   listing: MarketplaceListing;
@@ -37,7 +39,11 @@ export default function BotListingCard({
   isBuying = false,
   isCancelling = false,
 }: BotListingCardProps) {
-  const tier = (bot?.tier ?? "Basic") as BotTier;
+  // #476: listings carry their own bot_tier now, so the card no longer
+  // needs `bot` (a separate per-row lookup) just to know the tier — `bot`
+  // is still used below for nickname/id/accrual-rate, which the listing
+  // itself doesn't carry.
+  const tier = (listing.bot_tier ?? bot?.tier ?? "Basic") as BotTier;
   const tierName = BOT_TIER_NAMES[tier] ?? "Unknown";
   const tierColor = BOT_TIER_COLORS[tier] ?? "text-muted";
   const tierBg = BOT_TIER_BG_COLORS[tier] ?? "bg-muted/20";
@@ -46,7 +52,10 @@ export default function BotListingCard({
   const isOwner =
     connectedAddress !== null &&
     listing.seller.toLowerCase() === connectedAddress.toLowerCase();
-  const botLabel = `${bot?.name || tierName} Bot #${bot?.id?.toString() || listing.bot_id.toString()}`;
+  const botLabel = `${bot?.nickname || tierName} Bot #${bot?.id?.toString() || listing.bot_id.toString()}`;
+
+  const [isBuyingConfirmed, setIsBuyingConfirmed] = useState(false);
+  const [isCancellingConfirmed, setIsCancellingConfirmed] = useState(false);
 
   return (
     <motion.div
@@ -56,7 +65,7 @@ export default function BotListingCard({
       className={clsx(
         "relative rounded-2xl border border-liner bg-card p-4 sm:p-5",
         "flex flex-col gap-4",
-        "hover:border-white/10 transition-colors"
+        "hover:border-white/10 transition-colors",
       )}
       data-testid={`listing-card-${listing.id.toString()}`}
       role="group"
@@ -76,7 +85,7 @@ export default function BotListingCard({
           </div>
           <div className="min-w-0">
             <p className="truncate font-display text-sm font-semibold text-text">
-              {bot?.name || tierName} Bot
+              {bot?.nickname || tierName} Bot
             </p>
             <p className="text-xs text-muted">#{bot?.id?.toString() || listing.bot_id.toString()}</p>
           </div>
@@ -103,7 +112,7 @@ export default function BotListingCard({
               Rate
             </p>
             <p className="text-sm font-semibold text-text">
-              {(bot?.accrual_rate ?? BigInt(tierMeta?.rate || 1)).toString()}{" "}
+              {bot ? bot.accrual_rate.toString() : "—"}{" "}
               <span className="text-xs font-normal text-muted">pt/hr</span>
             </p>
           </div>
@@ -137,54 +146,90 @@ export default function BotListingCard({
         </span>
       </div>
 
+      {/* Currency (#476) — the contract's token address for this listing's price. */}
+      <div className="flex items-center justify-between gap-2 rounded-lg bg-card-2 px-3 py-2">
+        <span className="text-[10px] uppercase tracking-wider text-muted">
+          Currency
+        </span>
+        <span
+          className="truncate font-mono text-xs text-text"
+          title={listing.currency}
+          aria-label={`Priced in currency contract ${listing.currency}`}
+        >
+          {truncateAddress(listing.currency)}
+        </span>
+      </div>
+
       {/* Action button */}
       {isOwner ? (
-        <button
-          type="button"
-          onClick={() => onCancel(listing.id)}
-          disabled={isCancelling}
-          data-testid={`cancel-btn-${listing.id.toString()}`}
-          aria-label={
-            isCancelling ? `Cancelling listing for ${botLabel}` : `Cancel listing for ${botLabel}`
-          }
-          className={clsx(
-            "flex items-center justify-center gap-2 rounded-xl border px-4 py-2.5",
-            "text-sm font-medium transition-all",
-            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pink focus-visible:ring-offset-2 focus-visible:ring-offset-card",
-            isCancelling
-              ? "border-liner bg-card-2 text-muted cursor-not-allowed opacity-50"
-              : "border-pink/30 bg-pink/10 text-pink hover:bg-pink/20 hover:border-pink/50"
-          )}
-        >
-          <X className="h-4 w-4" aria-hidden="true" />
-          {isCancelling ? "Cancelling..." : "Cancel Listing"}
-        </button>
+        <>
+          <ConfirmDialog
+            isOpen={isCancellingConfirmed}
+            onClose={() => setIsCancellingConfirmed(false)}
+            title="Cancel Listing"
+            description={`Are you sure you want to cancel listing ${botLabel} for ${priceXlm} XLM?`}
+            onConfirm={() => onCancel(listing.id)}
+            confirmText="Cancel"
+            cancelText="Keep Listed"
+          />
+          <button
+            type="button"
+            onClick={() => setIsCancellingConfirmed(true)}
+            disabled={isCancelling}
+            data-testid={`cancel-btn-${listing.id.toString()}`}
+            aria-label={
+              isCancelling ? `Cancelling listing for ${botLabel}` : `Cancel listing for ${botLabel}`
+            }
+            className={clsx(
+              "flex items-center justify-center gap-2 rounded-xl border px-4 py-2.5",
+              "text-sm font-medium transition-all",
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pink focus-visible:ring-offset-2 focus-visible:ring-offset-card",
+              isCancelling
+                ? "border-liner bg-card-2 text-muted cursor-not-allowed opacity-50"
+                : "border-pink/30 bg-pink/10 text-pink hover:bg-pink/20 hover:border-pink/50",
+            )}
+          >
+            <X className="h-4 w-4" aria-hidden="true" />
+            {isCancelling ? "Cancelling..." : "Cancel Listing"}
+          </button>
+        </>
       ) : (
-        <button
-          type="button"
-          onClick={() => onBuy(listing.id)}
-          disabled={isBuying || !connectedAddress}
-          data-testid={`buy-btn-${listing.id.toString()}`}
-          aria-label={
-            !connectedAddress
-              ? `Connect your wallet to buy ${botLabel}`
-              : isBuying
+        <>
+          <ConfirmDialog
+            isOpen={isBuyingConfirmed}
+            onClose={() => setIsBuyingConfirmed(false)}
+            title="Buy Bot"
+            description={`Are you sure you want to buy ${botLabel} for ${priceXlm} XLM?`}
+            onConfirm={() => onBuy(listing.id)}
+            confirmText="Buy"
+            cancelText="Keep Browsing"
+          />
+          <button
+            type="button"
+            onClick={() => setIsBuyingConfirmed(true)}
+            disabled={isBuying || !connectedAddress}
+            data-testid={`buy-btn-${listing.id.toString()}`}
+            aria-label={
+              !connectedAddress
+                ? `Connect your wallet to buy ${botLabel}`
+                : isBuying
                 ? `Buying ${botLabel}`
                 : `Buy ${botLabel} for ${priceXlm.toLocaleString("en-US", { maximumFractionDigits: 2 })} XLM`
-          }
-          title={!connectedAddress ? "Connect your wallet to buy" : undefined}
-          className={clsx(
-            "flex items-center justify-center gap-2 rounded-xl border px-4 py-2.5",
-            "text-sm font-medium transition-all",
-            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold focus-visible:ring-offset-2 focus-visible:ring-offset-card",
-            isBuying || !connectedAddress
-              ? "border-liner bg-card-2 text-muted cursor-not-allowed opacity-50"
-              : "border-gold/30 bg-gold/10 text-gold hover:bg-gold/20 hover:border-gold/50"
-          )}
-        >
-          <ShoppingCart className="h-4 w-4" aria-hidden="true" />
-          {isBuying ? "Buying..." : "Buy"}
-        </button>
+            }
+            title={!connectedAddress ? "Connect your wallet to buy" : undefined}
+            className={clsx(
+              "flex items-center justify-center gap-2 rounded-xl border px-4 py-2.5",
+              "text-sm font-medium transition-all",
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold focus-visible:ring-offset-2 focus-visible:ring-offset-card",
+              isBuying || !connectedAddress
+                ? "border-liner bg-card-2 text-muted cursor-not-allowed opacity-50"
+                : "border-gold/30 bg-gold/10 text-gold hover:bg-gold/20 hover:border-gold/50",
+            )}
+          >
+            <ShoppingCart className="h-4 w-4" aria-hidden="true" />
+            {isBuying ? "Buying..." : "Buy"}
+          </button>
+        </>
       )}
     </motion.div>
   );

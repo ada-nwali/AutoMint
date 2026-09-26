@@ -91,11 +91,21 @@ AutoMint/
 │   ├── src/store/              # Zustand wallet store
 │   └── src/types/              # Shared TypeScript domain interfaces
 ├── docs/                       # Project Documentation
-│   ├── architecture.md         # Call graphs, auth matrix, storage layout & events (#566)
+│   ├── ARCHITECTURE.md         # Call graphs, auth matrix, storage layout & events (#212, #566)
+│   ├── DEPLOY.md               # Contract deployment runbook: keys, deploy.sh, verification (#217)
+│   ├── DEPLOYMENT.md           # Frontend hosting, env vars & CI preview deployments
+│   ├── MANUAL_TEST_REPORT.md   # Testnet end-to-end manual verification checklists
 │   ├── ONBOARDING.md           # Developer codebase reading order guide (#250)
 │   └── FLOWS.md                # Sequence flows for core user journeys
 ├── scripts/                    # Build & Deployment Automation
-│   └── deploy.sh               # Contract build, deployment & initialization script
+│   ├── deploy.sh               # Contract build, deployment & initialization script
+│   │                           #   (crash-resilient manifest + --dry-run/--force, #557)
+│   └── verify-deployment.sh    # Reproducible-build wasm hash verifier (#559)
+├── indexer/                    # Soroban event indexer + aggregate API + ops dashboard (#563)
+│   ├── src/                    # poller, decoder, SQLite store, Express API
+│   ├── public/index.html       # ops dashboard
+│   └── docs/EVENTS.md          # every indexed event schema
+├── deployments/                # gitignored per-network manifests (deploy.sh output)
 ├── CHANGELOG.md                # Release & milestone changelog (#246)
 └── Cargo.toml                  # Cargo workspace manifest
 ```
@@ -109,7 +119,7 @@ AutoMint/
   ```bash
   curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
   rustup target add wasm32v1-none
-  cargo install --locked stellar-cli --features opt
+  cargo install --locked stellar-cli --version 21.4.0 --features opt
   ```
 - **Node.js 18+ & npm** (for frontend development):
   ```bash
@@ -194,10 +204,15 @@ Automated CI Workflows:
 
 ## Documentation Links
 
-- [Contract Architecture Specification](docs/architecture.md) (`docs/architecture.md`)
+- [Contract Architecture Specification](docs/ARCHITECTURE.md) (`docs/ARCHITECTURE.md`)
+- [Contract Deployment Runbook](docs/DEPLOY.md) (`docs/DEPLOY.md`)
 - [Developer Onboarding Guide](docs/ONBOARDING.md) (`docs/ONBOARDING.md`)
 - [Sequence & Journey Flows](docs/FLOWS.md) (`docs/FLOWS.md`)
-- [Deployment & CI Preview Documentation](docs/DEPLOYMENT.md) (`docs/DEPLOYMENT.md`)
+- [Frontend Deployment & CI Preview Documentation](docs/DEPLOYMENT.md) (`docs/DEPLOYMENT.md`) — includes the `deployments/<network>.json` manifest schema and reproducible-build verification (#557/#559)
+- [Testnet Manual Test Report](docs/MANUAL_TEST_REPORT.md) (`docs/MANUAL_TEST_REPORT.md`)
+- [Dependency Policy](docs/DEPENDENCIES.md) (`docs/DEPENDENCIES.md`) — exact `soroban-sdk` pin and `testutils` feature rationale (#562)
+- [Indexer README](indexer/README.md) — run the event indexer, aggregate API & ops dashboard (#563)
+- [Indexed Event Schemas](indexer/docs/EVENTS.md) — every event the indexer consumes (#563)
 - [Project Changelog](CHANGELOG.md) (`CHANGELOG.md`)
 
 ---

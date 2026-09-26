@@ -24,6 +24,7 @@ jest.mock('next/link', () => {
 
 // Mock wallet store and hooks
 jest.mock('@/store/walletStore', () => ({
+  ...jest.requireActual('@/store/walletStore'),
   useWalletStore: (selector: any) => selector({ status: 'disconnected', publicKey: null }),
 }));
 
@@ -47,6 +48,23 @@ jest.mock('@/hooks/useAccrual', () => ({
   useAnimatedPoints: () => 0,
   useRegister: () => ({ mutate: jest.fn(), isPending: false, error: null }),
   useClaim: () => ({ mutate: jest.fn(), isPending: false, error: null }),
+}));
+
+// Tier rates and prices come from bot_nft (#478); the hook returns the
+// contract's current values (prices in stroops).
+type MockTierInfo = { tier: string; name: string; rate: bigint; price: bigint };
+const mockTierData: { current: Record<string, MockTierInfo> | undefined } = {
+  current: {
+    Basic: { tier: 'Basic', name: 'Basic Bot', rate: 1n, price: 0n },
+    Bronze: { tier: 'Bronze', name: 'Bronze Bot', rate: 5n, price: 5_000_000_000n },
+    Silver: { tier: 'Silver', name: 'Silver Bot', rate: 25n, price: 20_000_000_000n },
+    Gold: { tier: 'Gold', name: 'Gold Bot', rate: 100n, price: 75_000_000_000n },
+    Diamond: { tier: 'Diamond', name: 'Diamond Bot', rate: 500n, price: 250_000_000_000n },
+  },
+};
+
+jest.mock('@/hooks/useTiers', () => ({
+  useTiers: () => ({ data: mockTierData.current, isLoading: false }),
 }));
 
 import HomePage from '../app/page';
@@ -91,10 +109,10 @@ describe('Landing Page Integration', () => {
     expect(screen.getByText('Diamond')).toBeInTheDocument();
     // Check prices
     expect(screen.getByText('Free')).toBeInTheDocument();
-    expect(screen.getByText('5 XLM')).toBeInTheDocument();
-    expect(screen.getByText('15 XLM')).toBeInTheDocument();
-    expect(screen.getByText('40 XLM')).toBeInTheDocument();
-    expect(screen.getByText('100 XLM')).toBeInTheDocument();
+    expect(screen.getByText('500 XLM')).toBeInTheDocument();
+    expect(screen.getByText('2000 XLM')).toBeInTheDocument();
+    expect(screen.getByText('7500 XLM')).toBeInTheDocument();
+    expect(screen.getByText('25000 XLM')).toBeInTheDocument();
   });
 
   it('renders How It Works section with four steps', () => {
@@ -121,8 +139,7 @@ describe('Landing Page Integration', () => {
 
   it('renders CTA section with Get Started link', () => {
     render(<HomePage />);
-    expect(screen.getByText('Ready to')).toBeInTheDocument();
-    expect(screen.getByText('Mint')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /Ready to Mint/i })).toBeInTheDocument();
     const ctaLinks = screen.getAllByRole('link', { name: /Get Started/i });
     expect(ctaLinks.length).toBeGreaterThan(0);
     expect(ctaLinks[0]).toHaveAttribute('href', '/dashboard');
@@ -146,9 +163,37 @@ describe('Landing Page Integration', () => {
   it('renders all tiers with correct accrual rates', () => {
     render(<HomePage />);
     expect(screen.getByText('1x accrual rate')).toBeInTheDocument();
-    expect(screen.getByText('2x accrual rate')).toBeInTheDocument();
     expect(screen.getByText('5x accrual rate')).toBeInTheDocument();
-    expect(screen.getByText('10x accrual rate')).toBeInTheDocument();
     expect(screen.getByText('25x accrual rate')).toBeInTheDocument();
+    expect(screen.getByText('100x accrual rate')).toBeInTheDocument();
+    expect(screen.getByText('500x accrual rate')).toBeInTheDocument();
+  });
+
+  it('renders whatever rates and prices the contract reports (#478)', () => {
+    const original = mockTierData.current!;
+    mockTierData.current = {
+      ...original,
+      Diamond: { ...original.Diamond, rate: 750n, price: 300_000_000_000n },
+    };
+    try {
+      render(<HomePage />);
+      expect(screen.getByText('750x accrual rate')).toBeInTheDocument();
+      expect(screen.getByText('30000 XLM')).toBeInTheDocument();
+      expect(screen.queryByText('500x accrual rate')).not.toBeInTheDocument();
+    } finally {
+      mockTierData.current = original;
+    }
+  });
+
+  it('shows placeholders, not invented numbers, while tier data loads', () => {
+    const original = mockTierData.current;
+    mockTierData.current = undefined;
+    try {
+      render(<HomePage />);
+      expect(screen.getAllByText('— accrual rate')).toHaveLength(5);
+      expect(screen.queryByText('Free')).not.toBeInTheDocument();
+    } finally {
+      mockTierData.current = original;
+    }
   });
 });

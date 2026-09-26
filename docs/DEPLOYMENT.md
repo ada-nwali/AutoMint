@@ -45,6 +45,83 @@ To obtain fresh, functional contract IDs on Stellar Testnet:
 
 ---
 
+## Deployment Manifest (`deployments/<network>.json`)
+
+`scripts/deploy.sh` records every deployed contract in
+`deployments/<network>.json` **immediately after each step succeeds** (issues
+#557 + #559), so a crash mid-script never loses a contract ID and re-running
+resumes instead of redeploying. The manifest is gitignored — it holds live
+deployment state, not source.
+
+```json
+{
+  "network": "testnet",
+  "git_sha": "047c77c…",
+  "toolchain": "1.95.0",
+  "created_at": "2024-…",
+  "updated_at": "2024-…",
+  "contracts": {
+    "registry": {
+      "contract_id": "C…",
+      "initialized": true,
+      "initialized_at": "2024-…",
+      "deployed_at": "2024-…",
+      "wasm_path": "target/wasm32-unknown-unknown/release/automint_registry.wasm",
+      "wasm_hash": "<sha256 of the deployed wasm>",
+      "git_sha": "047c77c…"
+    }
+    // … bot_nft, accrual, marketplace, token …
+  }
+}
+```
+
+Key properties:
+
+- **Idempotent & resumable.** `deploy.sh` checks the manifest before each step:
+  a recorded `contract_id` skips the deploy; a recorded `initialized: true`
+  skips the init. `--force` bypasses both for a genuine full redeploy.
+  `--dry-run` prints the plan without deploying or writing anything.
+- **Contract IDs are validated** (56-char StrKey, `C` + 55 base32 chars) before
+  anything is written to the manifest, so a malformed RPC response can never
+  poison it.
+- **Wasm hash + git SHA** are recorded per contract for reproducible-build
+  verification below. If you bump any dependency or toolchain, rebuild and
+  re-record the manifest before redeploying (see `docs/DEPENDENCIES.md`).
+
+## Verifying a deployment (reproducible builds)
+
+`scripts/verify-deployment.sh <network>` rebuilds each recorded contract from
+the manifest's `git_sha` in a throwaway git worktree, **twice**, in two
+separate Cargo target directories, and asserts both rebuilt wasm sha256 hashes
+equal the `wasm_hash` recorded in the manifest (and therefore equal each
+other). Building twice in separate target dirs is what makes the "two builds of
+the same commit are byte-identical" guarantee directly checkable — a cached or
+noop build would trivially match.
+
+```bash
+# Verify all contracts recorded in deployments/testnet.json
+./scripts/verify-deployment.sh testnet
+
+# Verify a single contract
+./scripts/verify-deployment.sh testnet --contract token
+
+# Keep worktrees/target dirs under /tmp for debugging
+./scripts/verify-deployment.sh testnet --no-clean
+```
+
+Requirements: the pinned toolchain (`rust-toolchain.toml`) installed via
+`rustup`, the `wasm32-unknown-unknown` target, and the manifest must contain a
+non-empty `git_sha` and a `wasm_hash` for each contract being verified.
+
+Reproducibility rests on three pins, so all three land together (issues #562
+and #559):
+
+1. `rust-toolchain.toml` pins an exact rustc (`1.95.0`).
+2. `Cargo.toml` pins `soroban-sdk` to an exact version (`=21.7.7`).
+3. `Cargo.lock` is committed, and verification builds use `--locked`.
+
+
+
 ## Hosting Options
 
 ### 1. Vercel Deployment

@@ -14,5 +14,5 @@ testutils = ["soroban-sdk/testutils"]
 soroban-sdk = { workspace = true }
 
 [dev-dependencies]
-soroban-sdk = { version = "21", features = ["testutils"] }
+soroban-sdk = { version = "=21.7.7", features = ["testutils"] }
 automint-testutils = { path = "../testutils" }
