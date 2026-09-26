@@ -137,6 +137,10 @@ pub enum BotNFTError {
     BatchTooLarge = 10,
     NicknameTooLong = 11,
     RangeLimitExceeded = 12,
+    /// `withdraw` amount was zero or negative.
+    InvalidAmount = 13,
+    /// `withdraw` amount exceeds the treasury balance of the payment token.
+    InsufficientTreasury = 14,
 }
 
 const LEDGER_BUMP: u32 = 120960;
@@ -287,6 +291,44 @@ impl BotNFTContract {
             Tier::Premium => BotTier::Silver,
         };
         Self::do_mint(&env, &owner, bot_tier, false)
+    }
+
+    /// Admin-only withdrawal of accumulated tier payments (#322).
+    ///
+    /// `mint_tier` takes the payment token as a per-call argument (no token is
+    /// stored yet), so the token to withdraw is passed explicitly. The balance
+    /// is checked up front so an over-withdrawal fails before any transfer.
+    pub fn withdraw(
+        env: Env,
+        token: Address,
+        to: Address,
+        amount: i128,
+    ) -> Result<(), BotNFTError> {
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .ok_or(BotNFTError::NotInitialized)?;
+        admin.require_auth();
+
+        if amount <= 0 {
+            return Err(BotNFTError::InvalidAmount);
+        }
+        let token_client = token::Client::new(&env, &token);
+        let this = env.current_contract_address();
+        if amount > token_client.balance(&this) {
+            return Err(BotNFTError::InsufficientTreasury);
+        }
+        token_client.transfer(&this, &to, &amount);
+
+        env.events()
+            .publish((symbol_short!("withdraw"),), (admin, to, amount));
+        Ok(())
+    }
+
+    /// Balance of `token` held by this contract (accumulated tier payments).
+    pub fn treasury_balance(env: Env, token: Address) -> i128 {
+        token::Client::new(&env, &token).balance(&env.current_contract_address())
     }
 
     /// Admin-controlled mint (no payment) for airdrops / grants. Distinguishable
@@ -2384,5 +2426,66 @@ mod registry_cross_contract_tests {
 
         // Assert regfail event was emitted
         assert_regfail_emitted(&env, &alice);
+    }
+
+    // #322: tier payments can be withdrawn by the admin.
+    #[test]
+    fn test_withdraw_full_treasury_after_priced_mint() {
+        let (env, _admin, registry, token, client) = setup();
+        let user = Address::generate(&env);
+        let to = Address::generate(&env);
+        register_user(&env, &registry, &user, "user1");
+        let price = Tier::Advanced.price();
+        fund_user(&env, &token, &user, price);
+        client.mint_tier(&user, &Tier::Advanced, &token);
+        assert_eq!(client.treasury_balance(&token), price);
+
+        client.withdraw(&token, &to, &price);
+        assert_eq!(client.treasury_balance(&token), 0);
+        let tc = automint_token::AMTTokenClient::new(&env, &token);
+        assert_eq!(tc.balance(&to), price);
+    }
+
+    #[test]
+    fn test_withdraw_rejects_bad_amounts_without_partial_transfer() {
+        let (env, _admin, registry, token, client) = setup();
+        let user = Address::generate(&env);
+        let to = Address::generate(&env);
+        register_user(&env, &registry, &user, "user1");
+        let price = Tier::Advanced.price();
+        fund_user(&env, &token, &user, price);
+        client.mint_tier(&user, &Tier::Advanced, &token);
+
+        assert_eq!(
+            client.try_withdraw(&token, &to, &0),
+            Err(Ok(BotNFTError::InvalidAmount))
+        );
+        assert_eq!(
+            client.try_withdraw(&token, &to, &-5),
+            Err(Ok(BotNFTError::InvalidAmount))
+        );
+        assert_eq!(
+            client.try_withdraw(&token, &to, &(price + 1)),
+            Err(Ok(BotNFTError::InsufficientTreasury))
+        );
+        assert_eq!(client.treasury_balance(&token), price);
+        let tc = automint_token::AMTTokenClient::new(&env, &token);
+        assert_eq!(tc.balance(&to), 0);
+    }
+
+    #[test]
+    fn test_withdraw_requires_admin_auth() {
+        let (env, _admin, registry, token, client) = setup();
+        let user = Address::generate(&env);
+        let to = Address::generate(&env);
+        register_user(&env, &registry, &user, "user1");
+        let price = Tier::Advanced.price();
+        fund_user(&env, &token, &user, price);
+        client.mint_tier(&user, &Tier::Advanced, &token);
+
+        // No auths mocked: admin.require_auth() must fail the call.
+        env.mock_auths(&[]);
+        assert!(client.try_withdraw(&token, &to, &price).is_err());
+        assert_eq!(client.treasury_balance(&token), price);
     }
 }

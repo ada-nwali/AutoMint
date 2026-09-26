@@ -8,6 +8,17 @@ use automint_registry::RegistryContractClient;
 use automint_testutils::{deploy_all, deploy_bot_nft_with_registry, register_user};
 use automint_token::AMTTokenClient;
 use soroban_sdk::{testutils::Address as _, Env};
+extern crate std;
+
+// Tier supply is capped at 50 per tier, so bulk-listing tests spread bots
+// round-robin across all five tiers.
+const TIERS: [BotTier; 5] = [
+    BotTier::Basic,
+    BotTier::Bronze,
+    BotTier::Silver,
+    BotTier::Gold,
+    BotTier::Diamond,
+];
 
 struct Harness<'a> {
     env: Env,
@@ -78,7 +89,7 @@ fn test_list_bot_ids_are_sequential() {
     assert_eq!(l1, 1);
     assert_eq!(l2, 2);
 
-    assert_eq!(h.mkt.get_active_listings(&0, &100).len(), 2);
+    assert_eq!(h.mkt.get_active_listings(&0, &100).0.len(), 2);
     assert_eq!(h.mkt.get_user_listings(&seller).len(), 2);
 }
 
@@ -215,7 +226,7 @@ fn test_config_returns_admin_and_bot_nft() {
 #[test]
 fn test_active_listings_empty_initially() {
     let h = setup();
-    assert_eq!(h.mkt.get_active_listings(&0, &100).len(), 0);
+    assert_eq!(h.mkt.get_active_listings(&0, &100).0.len(), 0);
 }
 
 #[test]
@@ -252,7 +263,7 @@ fn test_buy_bot_pays_seller_minus_fee_and_transfers_bot() {
     // Listing is now inactive
     let listing = h.mkt.get_listing(&listing_id);
     assert!(!listing.active);
-    assert_eq!(h.mkt.get_active_listings(&0, &100).len(), 0);
+    assert_eq!(h.mkt.get_active_listings(&0, &100).0.len(), 0);
 }
 
 #[test]
@@ -276,7 +287,7 @@ fn test_cancel_listing_returns_bot_to_seller() {
     // Listing is inactive and removed from active list
     let listing = h.mkt.get_listing(&listing_id);
     assert!(!listing.active);
-    assert_eq!(h.mkt.get_active_listings(&0, &100).len(), 0);
+    assert_eq!(h.mkt.get_active_listings(&0, &100).0.len(), 0);
 }
 
 #[test]
@@ -972,13 +983,13 @@ fn test_buy_stale_listing_fails_before_payment_and_marks_inactive() {
     assert_eq!(h.token.balance(&buyer), buyer_balance_before);
     assert_eq!(h.token.balance(&seller), seller_balance_before);
     // Stale listing stops appearing in active listings (filtered by ownership)
-    assert_eq!(h.mkt.get_active_listings(&0, &100).len(), 0);
+    assert_eq!(h.mkt.get_active_listings(&0, &100).0.len(), 0);
     // Historical get_listing still returns it (active flag may still be true due to
     // host revert on error, but the filtered active list is empty)
     let listing = h.mkt.get_listing(&listing_id);
     // If host reverts, active may still be true; we check that it is not in active list
     // and that a subsequent buy still fails as stale (or not active)
-    assert!(h.mkt.get_active_listings(&0, &100).len() == 0);
+    assert!(h.mkt.get_active_listings(&0, &100).0.len() == 0);
     assert_eq!(h.bot.get_bot(&bot_id).owner, seller);
 }
 
@@ -1118,7 +1129,7 @@ fn test_index_consistency_after_30_mixed_operations() {
                 total_created += 1;
             }
         } else if op == 1 {
-            let actives = h.mkt.get_active_listings(&0, &100);
+            let actives = h.mkt.get_active_listings(&0, &100).0;
             if actives.len() > 0 {
                 let listing = actives.get(0).unwrap();
                 let buyer = buyers.get((i % 3) as u32).unwrap().clone();
@@ -1127,7 +1138,7 @@ fn test_index_consistency_after_30_mixed_operations() {
                 }
             }
         } else if op == 2 {
-            let actives = h.mkt.get_active_listings(&0, &100);
+            let actives = h.mkt.get_active_listings(&0, &100).0;
             for l in actives.iter() {
                 if l.seller == seller {
                     let _ = h.mkt.try_cancel_listing(&seller, &l.id);
@@ -1135,7 +1146,7 @@ fn test_index_consistency_after_30_mixed_operations() {
                 }
             }
         }
-        let actives = h.mkt.get_active_listings(&0, &200);
+        let actives = h.mkt.get_active_listings(&0, &200).0;
         let mut seen: soroban_sdk::Vec<u64> = soroban_sdk::Vec::new(&h.env);
         for l in actives.iter() {
             assert!(l.active, "active listing {} should be active", l.id);
@@ -1167,8 +1178,8 @@ fn test_index_consistency_after_30_mixed_operations() {
         h.mkt.try_get_listing(&final_next),
         Err(Ok(MarketplaceError::ListingNotFound))
     );
-    assert_eq!(h.mkt.get_active_listings(&1000, &10).len(), 0);
-    assert_eq!(h.mkt.get_active_listings(&0, &0).len(), 0);
+    assert_eq!(h.mkt.get_active_listings(&1000, &10).0.len(), 0);
+    assert_eq!(h.mkt.get_active_listings(&0, &0).0.len(), 0);
 }
 
 // ── every MarketplaceError variant has a test that asserts that exact variant ─
@@ -1612,7 +1623,7 @@ fn test_e2e_five_contract_full_flow() {
     assert_eq!(listing.seller, alice);
     assert_eq!(listing.bot_id, gold_id);
     assert_eq!(listing.price, price);
-    assert_eq!(marketplace.get_active_listings(&0, &100).len(), 1);
+    assert_eq!(marketplace.get_active_listings(&0, &100).0.len(), 1);
 
     // Fund Bob to afford the purchase. Bob currently has 36 AMT; mint price to cover.
     // Mint exactly price so Bob's balance becomes 36 + price.
@@ -1648,7 +1659,7 @@ fn test_e2e_five_contract_full_flow() {
     );
     // Active listings empty, historical listing inactive.
     assert_eq!(
-        marketplace.get_active_listings(&0, &100).len(),
+        marketplace.get_active_listings(&0, &100).0.len(),
         0,
         "no active listings after buy"
     );
@@ -2105,4 +2116,183 @@ fn test_admin_transfer_takes_two_steps() {
     h.mkt.accept_admin();
     assert_eq!(h.mkt.config().admin, new_admin);
     assert_eq!(h.mkt.pending_admin(), None);
+}
+
+// ---- #323: fee leg is checked; total is pulled first ------------------------
+
+#[test]
+fn test_buy_conserves_price_and_admin_gets_exact_fee() {
+    let h = setup();
+    let cfg = h.mkt.config();
+    let seller = Address::generate(&h.env);
+    let buyer = Address::generate(&h.env);
+    let price = 1000_0000000_i128;
+    let bot_id = h.bot.mint_basic(&seller);
+    let l = h.mkt.list_bot(&seller, &bot_id, &price, &h.token.address);
+    h.token.mint(&buyer, &price);
+
+    let fee = price * cfg.fee_bps as i128 / 10_000;
+    let seller_before = h.token.balance(&seller);
+    let admin_before = h.token.balance(&cfg.admin);
+    h.mkt.buy_bot(&buyer, &l);
+
+    assert_eq!(h.token.balance(&cfg.admin) - admin_before, fee);
+    assert_eq!(
+        (h.token.balance(&seller) - seller_before) + (h.token.balance(&cfg.admin) - admin_before),
+        price
+    );
+    assert_eq!(h.token.balance(&buyer), 0);
+    assert_eq!(h.token.balance(&h.mkt.address), 0, "no funds stranded");
+}
+
+#[test]
+fn test_buy_one_short_keeps_listing_and_escrow() {
+    let h = setup();
+    let seller = Address::generate(&h.env);
+    let buyer = Address::generate(&h.env);
+    let price = 1000_0000000_i128;
+    let bot_id = h.bot.mint_basic(&seller);
+    let l = h.mkt.list_bot(&seller, &bot_id, &price, &h.token.address);
+    h.token.mint(&buyer, &(price - 1));
+
+    assert_eq!(
+        h.mkt.try_buy_bot(&buyer, &l),
+        Err(Ok(MarketplaceError::PaymentFailed))
+    );
+    assert!(h.mkt.get_listing(&l).active);
+    assert_eq!(h.bot.get_bot(&bot_id).owner, h.mkt.address);
+    assert_eq!(h.token.balance(&buyer), price - 1);
+}
+
+// ---- #333: paged listing index ---------------------------------------------
+
+fn list_many(h: &Harness<'static>, sellers: &[Address], per_seller: u32, price: i128) -> std::vec::Vec<u64> {
+    let mut ids = std::vec::Vec::new();
+    let mut n = 0usize;
+    for s in sellers {
+        for _ in 0..per_seller {
+            let bot = h.bot.admin_mint(s, &TIERS[n % 5]);
+            n += 1;
+            ids.push(h.mkt.list_bot(s, &bot, &price, &h.token.address));
+        }
+    }
+    ids
+}
+
+#[test]
+fn test_listing_pages_are_bounded_and_cursor_visits_each_once() {
+    let h = setup();
+    h.env.budget().reset_unlimited();
+    let price = 100_0000000_i128;
+    // 5 sellers x 40 = 200 listings.
+    let sellers: std::vec::Vec<Address> = (0..5).map(|_| Address::generate(&h.env)).collect();
+    let ids = list_many(&h, &sellers, 40, price);
+    assert_eq!(ids.len(), 200);
+    // 200 ids / 100 per page = 2 pages, never one unbounded entry.
+    assert_eq!(h.mkt.listing_page_count(), 2);
+
+    // Paginate with the returned cursor, cancelling mid-way.
+    let mut cursor = 0u64;
+    let mut seen: std::vec::Vec<u64> = std::vec::Vec::new();
+    let mut first = true;
+    loop {
+        let (page, next) = h.mkt.get_active_listings(&cursor, &25);
+        for l in page.iter() {
+            assert!(l.active);
+            seen.push(l.id);
+        }
+        if first {
+            // Cancel a listing already seen and one not yet reached.
+            let l0 = h.mkt.get_listing(&ids[0]);
+            h.mkt.cancel_listing(&l0.seller, &ids[0]);
+            let l_late = h.mkt.get_listing(&ids[150]);
+            h.mkt.cancel_listing(&l_late.seller, &ids[150]);
+            first = false;
+        }
+        if next == cursor {
+            break;
+        }
+        cursor = next;
+    }
+    // Every still-active listing exactly once (ids[0] was seen before cancel).
+    let mut sorted = seen.clone();
+    sorted.sort();
+    sorted.dedup();
+    assert_eq!(sorted.len(), seen.len(), "no duplicates");
+    for (i, id) in ids.iter().enumerate() {
+        if i == 150 {
+            assert!(!seen.contains(id));
+        } else {
+            assert!(seen.contains(id), "listing {} visited", id);
+        }
+    }
+}
+
+#[test]
+fn test_compact_page_drops_tombstones_and_pagination_survives() {
+    let h = setup();
+    h.env.budget().reset_unlimited();
+    let sellers: std::vec::Vec<Address> = (0..2).map(|_| Address::generate(&h.env)).collect();
+    let ids = list_many(&h, &sellers, 10, 100_0000000_i128);
+    for id in ids.iter().take(15) {
+        let l = h.mkt.get_listing(id);
+        h.mkt.cancel_listing(&l.seller, id);
+    }
+    assert_eq!(h.mkt.compact_page(&0), 15);
+    assert_eq!(h.mkt.compact_page(&0), 0);
+    let (page, _) = h.mkt.get_active_listings(&0, &100);
+    assert_eq!(page.len(), 5);
+    assert_eq!(page.get(0).unwrap().id, ids[15]);
+}
+
+#[test]
+fn test_500_listings_across_relist_cycles_stay_paged() {
+    let h = setup();
+    h.env.budget().reset_unlimited();
+    let sellers: std::vec::Vec<Address> = (0..5).map(|_| Address::generate(&h.env)).collect();
+    let price = 100_0000000_i128;
+    let mut total = 0u32;
+    let mut bots: std::vec::Vec<(Address, u64)> = std::vec::Vec::new();
+    for s in &sellers {
+        for _ in 0..40 {
+            let t = TIERS[bots.len() % 5];
+            bots.push((s.clone(), h.bot.admin_mint(s, &t)));
+        }
+    }
+    // 200 bots; list/cancel cycles until 500 listing ids were issued.
+    let mut last_ids = std::vec::Vec::new();
+    while total < 500 {
+        last_ids.clear();
+        for (s, b) in &bots {
+            if total >= 500 {
+                break;
+            }
+            last_ids.push(h.mkt.list_bot(s, b, &price, &h.token.address));
+            total += 1;
+        }
+        if total < 500 {
+            for id in &last_ids {
+                let l = h.mkt.get_listing(id);
+                h.mkt.cancel_listing(&l.seller, id);
+            }
+        }
+    }
+    assert_eq!(h.mkt.next_listing_id(), 501);
+    assert_eq!(h.mkt.listing_page_count(), 5);
+    // Only the last batch is active.
+    let (page, _) = h.mkt.get_active_listings(&0, &200);
+    assert!(page.iter().all(|l| l.active));
+}
+
+#[test]
+fn test_cancel_cost_does_not_rebuild_index() {
+    // Tombstoning: cancel leaves the id in its page and the listing readable.
+    let h = setup();
+    let seller = Address::generate(&h.env);
+    let bot = h.bot.mint_basic(&seller);
+    let l = h.mkt.list_bot(&seller, &bot, &100_0000000_i128, &h.token.address);
+    h.mkt.cancel_listing(&seller, &l);
+    assert!(!h.mkt.get_listing(&l).active);
+    assert_eq!(h.mkt.get_active_listings(&0, &10).0.len(), 0);
+    assert_eq!(h.mkt.compact_page(&0), 1);
 }

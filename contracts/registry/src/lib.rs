@@ -13,7 +13,10 @@ pub enum DataKey {
     UserProfile(Address),
     Username(String),
     // Global storage
-    UserList,
+    /// Bounded leaderboard (#332): `Vec<(Address, u64)>` of at most
+    /// `LEADERBOARD_SIZE` entries, sorted by points descending. Ties: the user
+    /// who reached that total first ranks higher.
+    TopUsers,
     TotalUsers,
     Admin,
     Initialized,
@@ -58,6 +61,9 @@ pub enum RegistryError {
 const LEDGER_BUMP: u32 = 120960;
 const LEDGER_THRESHOLD: u32 = 103680;
 
+/// Maximum number of users tracked by the leaderboard (#332).
+pub const LEADERBOARD_SIZE: u32 = 100;
+
 #[contract]
 pub struct RegistryContract;
 
@@ -73,7 +79,7 @@ impl RegistryContract {
         env.storage().instance().set(&DataKey::TotalUsers, &0u32);
         env.storage()
             .instance()
-            .set(&DataKey::UserList, &Vec::<Address>::new(&env));
+            .set(&DataKey::TopUsers, &Vec::<(Address, u64)>::new(&env));
         env.storage()
             .instance()
             .extend_ttl(LEDGER_THRESHOLD, LEDGER_BUMP);
@@ -133,14 +139,14 @@ impl RegistryContract {
             LEDGER_BUMP,
         );
 
-        // Add user to the global user list
-        let mut list: Vec<Address> = env
-            .storage()
-            .instance()
-            .get(&DataKey::UserList)
-            .unwrap_or_else(|| Vec::new(&env));
-        list.push_back(user.clone());
-        env.storage().instance().set(&DataKey::UserList, &list);
+        // While the leaderboard has room, a new (0-point) user joins at the
+        // end so small deployments still list every registered user in
+        // registration order. Once full, only users who earn points get in.
+        let mut top = Self::load_top(&env);
+        if top.len() < LEADERBOARD_SIZE {
+            top.push_back((user.clone(), 0u64));
+            env.storage().instance().set(&DataKey::TopUsers, &top);
+        }
 
         // Increment total user counter
         let total: u32 = env
@@ -246,6 +252,7 @@ impl RegistryContract {
             LEDGER_THRESHOLD,
             LEDGER_BUMP,
         );
+        Self::update_top(&env, &user, profile.total_points);
         env.events()
             .publish((symbol_short!("addpoints"), user), points);
         Ok(())
@@ -323,41 +330,78 @@ impl RegistryContract {
         Ok(())
     }
 
-    // Bubble sort in-contract — gas bounded by user count
-    pub fn get_leaderboard(env: Env, limit: u32) -> Vec<UserProfile> {
-        if limit == 0 {
-            return Vec::new(&env);
-        }
-        let list: Vec<Address> = env
-            .storage()
+    fn load_top(env: &Env) -> Vec<(Address, u64)> {
+        env.storage()
             .instance()
-            .get(&DataKey::UserList)
-            .unwrap_or_else(|| Vec::new(&env));
-        let mut profiles: Vec<UserProfile> = Vec::new(&env);
-        for addr in list.iter() {
+            .get(&DataKey::TopUsers)
+            .unwrap_or_else(|| Vec::new(env))
+    }
+
+    /// Incrementally maintain the bounded top-N list (#332). Cost is O(N) with
+    /// N = `LEADERBOARD_SIZE`, independent of total user count. Points only
+    /// ever increase, so a user already listed is moved up; an unlisted user
+    /// enters only if the list has room or strictly beats the current floor
+    /// (a tie with the floor keeps the incumbent, who reached the total first).
+    fn update_top(env: &Env, user: &Address, new_total: u64) {
+        let mut top = Self::load_top(env);
+
+        let mut was_listed = false;
+        let mut i = 0;
+        while i < top.len() {
+            if top.get(i).unwrap().0 == *user {
+                top.remove(i);
+                was_listed = true;
+                break;
+            }
+            i += 1;
+        }
+
+        if !was_listed && top.len() >= LEADERBOARD_SIZE {
+            let floor = top.last().map(|e| e.1).unwrap_or(0);
+            if new_total <= floor {
+                return; // list unchanged (nothing was removed)
+            }
+        }
+
+        // Insert after every entry with points >= new_total (stable ties).
+        let mut pos = top.len();
+        let mut k = 0;
+        while k < top.len() {
+            if top.get(k).unwrap().1 < new_total {
+                pos = k;
+                break;
+            }
+            k += 1;
+        }
+        top.insert(pos, (user.clone(), new_total));
+        if top.len() > LEADERBOARD_SIZE {
+            top.pop_back();
+        }
+        env.storage().instance().set(&DataKey::TopUsers, &top);
+    }
+
+    /// Top users by points, highest first. Reads the maintained `TopUsers`
+    /// list and hydrates at most `min(limit, LEADERBOARD_SIZE)` profiles, so the
+    /// cost does not depend on the total number of users. Equal totals are
+    /// ordered by who reached the total first (earlier wins), deterministically.
+    pub fn get_leaderboard(env: Env, limit: u32) -> Vec<UserProfile> {
+        let mut result: Vec<UserProfile> = Vec::new(&env);
+        if limit == 0 {
+            return result;
+        }
+        let top = Self::load_top(&env);
+        let take = limit.min(LEADERBOARD_SIZE);
+        for (addr, _) in top.iter() {
+            if result.len() >= take {
+                break;
+            }
             if let Some(p) = env
                 .storage()
                 .persistent()
-                .get::<_, UserProfile>(&DataKey::UserProfile(addr.clone()))
+                .get::<_, UserProfile>(&DataKey::UserProfile(addr))
             {
-                profiles.push_back(p);
+                result.push_back(p);
             }
-        }
-        let n = profiles.len();
-        for i in 0..n {
-            for j in 0..n.saturating_sub(i).saturating_sub(1) {
-                let a = profiles.get(j).unwrap();
-                let b = profiles.get(j + 1).unwrap();
-                if a.total_points < b.total_points {
-                    profiles.set(j, b);
-                    profiles.set(j + 1, a);
-                }
-            }
-        }
-        let take = limit.min(n) as usize;
-        let mut result: Vec<UserProfile> = Vec::new(&env);
-        for p in profiles.iter().take(take) {
-            result.push_back(p);
         }
         result
     }
@@ -592,6 +636,71 @@ mod test {
         let (_env, _admin, client) = setup();
         let lb = client.get_leaderboard(&10_u32);
         assert_eq!(lb.len(), 0);
+    }
+
+    // #332: 500 users; only the bounded top-N is maintained and returned.
+    #[test]
+    fn test_leaderboard_500_users_top_10_ordered() {
+        let (env, _admin, client) = setup();
+        env.budget().reset_unlimited();
+        let mut addrs = std::vec::Vec::new();
+        for i in 0..500u32 {
+            let u = Address::generate(&env);
+            let name = std::format!("user{}", i);
+            client.register(&u, &String::from_str(&env, &name));
+            // Distinct totals, deliberately not in registration order.
+            let pts = ((i * 37) % 500 + 1) as u64;
+            client.add_points(&u, &pts);
+            addrs.push((u, pts));
+        }
+        let lb = client.get_leaderboard(&10_u32);
+        assert_eq!(lb.len(), 10);
+        let mut expected: std::vec::Vec<u64> = addrs.iter().map(|(_, p)| *p).collect();
+        expected.sort_by(|a, b| b.cmp(a));
+        for k in 0..10u32 {
+            assert_eq!(lb.get(k).unwrap().total_points, expected[k as usize]);
+        }
+        // Never more than LEADERBOARD_SIZE, even when asked for everything.
+        assert_eq!(client.get_leaderboard(&1000_u32).len(), LEADERBOARD_SIZE);
+    }
+
+    // #332: a listed user moving up, and a newcomer evicting the floor.
+    #[test]
+    fn test_leaderboard_eviction_and_reordering() {
+        let (env, _admin, client) = setup();
+        env.budget().reset_unlimited();
+        let mut users = std::vec::Vec::new();
+        for i in 0..(LEADERBOARD_SIZE + 5) {
+            let u = Address::generate(&env);
+            client.register(&u, &String::from_str(&env, &std::format!("u{}", i)));
+            client.add_points(&u, &10_u64);
+            users.push(u);
+        }
+        // Board is full of 10-pointers; a late 10-pointer did not displace anyone.
+        let lb = client.get_leaderboard(&LEADERBOARD_SIZE);
+        assert_eq!(lb.len(), LEADERBOARD_SIZE);
+        assert!(lb.iter().all(|p| p.address != users[LEADERBOARD_SIZE as usize]));
+        // A late user beating the floor gets in at the top and evicts the last.
+        client.add_points(&users[LEADERBOARD_SIZE as usize + 1], &1000_u64);
+        let lb = client.get_leaderboard(&LEADERBOARD_SIZE);
+        assert_eq!(lb.get(0).unwrap().address, users[LEADERBOARD_SIZE as usize + 1]);
+        assert_eq!(lb.len(), LEADERBOARD_SIZE);
+        assert!(lb.iter().all(|p| p.address != users[LEADERBOARD_SIZE as usize - 1]));
+    }
+
+    // #332: equal totals rank by who reached the total first.
+    #[test]
+    fn test_leaderboard_tie_order_is_first_to_reach() {
+        let (env, _admin, client) = setup();
+        let a = Address::generate(&env);
+        let b = Address::generate(&env);
+        client.register(&a, &String::from_str(&env, "ta"));
+        client.register(&b, &String::from_str(&env, "tb"));
+        client.add_points(&b, &50_u64);
+        client.add_points(&a, &50_u64);
+        let lb = client.get_leaderboard(&2_u32);
+        assert_eq!(lb.get(0).unwrap().address, b);
+        assert_eq!(lb.get(1).unwrap().address, a);
     }
 
     #[test]
@@ -1127,7 +1236,7 @@ mod test {
     // reset the TTL clock, so the entry survives past what would have been
     // its original expiry ledger.
     //
-    // Note: the *contract instance* (Admin/Initialized/TotalUsers/UserList)
+    // Note: the *contract instance* (Admin/Initialized/TotalUsers/TopUsers)
     // has its own independent TTL, bumped only by `initialize`/`register`.
     // To isolate the behaviour we care about (the user profile's TTL
     // renewal), this test also registers a second, unrelated "keepalive"
