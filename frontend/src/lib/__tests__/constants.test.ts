@@ -48,29 +48,14 @@ describe("constants.ts", () => {
 
     it("resolves default contract IDs and CONTRACT_ADDRESSES mapping", () => {
       const constants = require("../constants");
-      expect(constants.REGISTRY_CONTRACT_ID).toBe(
-        "CCXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX01"
-      );
-      expect(constants.BOT_NFT_CONTRACT_ID).toBe(
-        "CCXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX02"
-      );
-      expect(constants.ACCRUAL_CONTRACT_ID).toBe(
-        "CCXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX03"
-      );
-      expect(constants.MARKETPLACE_CONTRACT_ID).toBe(
-        "CCXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX04"
-      );
-      expect(constants.TOKEN_CONTRACT_ID).toBe(
-        "CCXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX05"
-      );
-
       expect(constants.CONTRACT_ADDRESSES).toEqual({
-        registry: constants.REGISTRY_CONTRACT_ID,
-        botNft: constants.BOT_NFT_CONTRACT_ID,
-        accrual: constants.ACCRUAL_CONTRACT_ID,
-        marketplace: constants.MARKETPLACE_CONTRACT_ID,
-        token: constants.TOKEN_CONTRACT_ID,
+        registry: "CCXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX01",
+        botNft: "CCXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX02",
+        accrual: "CCXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX03",
+        marketplace: "CCXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX04",
+        token: "CCXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX05",
       });
+      expect(constants.REGISTRY_CONTRACT_ID).toBeUndefined();
     });
 
     it("resolves default numeric tunables, fees, and intervals", () => {
@@ -148,12 +133,6 @@ describe("constants.ts", () => {
 
     it("resolves custom contract IDs and updates CONTRACT_ADDRESSES mapping", () => {
       const constants = require("../constants");
-      expect(constants.REGISTRY_CONTRACT_ID).toBe("CAREGISTRY1234567890");
-      expect(constants.BOT_NFT_CONTRACT_ID).toBe("CABOTNFT1234567890");
-      expect(constants.ACCRUAL_CONTRACT_ID).toBe("CAACCRUAL1234567890");
-      expect(constants.MARKETPLACE_CONTRACT_ID).toBe("CAMARKETPLACE1234567890");
-      expect(constants.TOKEN_CONTRACT_ID).toBe("CATOKEN1234567890");
-
       expect(constants.CONTRACT_ADDRESSES).toEqual({
         registry: "CAREGISTRY1234567890",
         botNft: "CABOTNFT1234567890",

@@ -401,7 +401,8 @@ init_contract bot_nft initialize --admin "$ADMIN_ADDRESS" --registry "$(resolve_
 verify_contract bot_nft
 
 deploy_contract accrual
-init_contract accrual initialize --admin "$ADMIN_ADDRESS" --points_per_amt 100
+init_contract accrual initialize --admin "$ADMIN_ADDRESS" \
+  --bot_nft "$(resolve_id bot_nft)" --points_per_amt 100
 verify_contract accrual
 
 deploy_contract marketplace

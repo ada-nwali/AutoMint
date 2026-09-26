@@ -86,6 +86,9 @@
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM"
                 },
                 {
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                },
+                {
                   "u64": 100
                 }
               ]
@@ -231,9 +234,6 @@
               "args": [
                 {
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOLZM"
-                },
-                {
-                  "u64": 3600
                 }
               ]
             }
@@ -253,9 +253,6 @@
               "args": [
                 {
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAARQG5"
-                },
-                {
-                  "u64": 3600
                 }
               ]
             }
@@ -574,7 +571,7 @@
   "ledger": {
     "protocol_version": 21,
     "sequence_number": 10,
-    "timestamp": 3600,
+    "timestamp": 12960000,
     "network_id": "0000000000000000000000000000000000000000000000000000000000000000",
     "base_reserve": 0,
     "min_persistent_entry_ttl": 4096,
@@ -1313,11 +1310,9 @@
                     },
                     {
                       "key": {
-                        "symbol": "name"
+                        "symbol": "nickname"
                       },
-                      "val": {
-                        "string": "Basic Bot"
-                      }
+                      "val": "void"
                     },
                     {
                       "key": {
@@ -1415,11 +1410,9 @@
                     },
                     {
                       "key": {
-                        "symbol": "name"
+                        "symbol": "nickname"
                       },
-                      "val": {
-                        "string": "Basic Bot"
-                      }
+                      "val": "void"
                     },
                     {
                       "key": {
@@ -1496,7 +1489,7 @@
                         "symbol": "bonus_bps"
                       },
                       "val": {
-                        "u32": 80
+                        "u32": 28
                       }
                     },
                     {
@@ -1512,16 +1505,14 @@
                         "symbol": "minted_at"
                       },
                       "val": {
-                        "u64": 3600
+                        "u64": 12960000
                       }
                     },
                     {
                       "key": {
-                        "symbol": "name"
+                        "symbol": "nickname"
                       },
-                      "val": {
-                        "string": "Gold Bot"
-                      }
+                      "val": "void"
                     },
                     {
                       "key": {
@@ -1544,7 +1535,7 @@
                         "symbol": "variant"
                       },
                       "val": {
-                        "u32": 4
+                        "u32": 7
                       }
                     }
                   ]
@@ -2325,7 +2316,7 @@
                         "symbol": "last_claim_ts"
                       },
                       "val": {
-                        "u64": 3600
+                        "u64": 12960000
                       }
                     },
                     {
@@ -2341,7 +2332,7 @@
                         "symbol": "rate"
                       },
                       "val": {
-                        "u64": 3600
+                        "u64": 1
                       }
                     },
                     {
@@ -2419,7 +2410,7 @@
                         "symbol": "last_claim_ts"
                       },
                       "val": {
-                        "u64": 3600
+                        "u64": 12960000
                       }
                     },
                     {
@@ -2435,7 +2426,7 @@
                         "symbol": "rate"
                       },
                       "val": {
-                        "u64": 3600
+                        "u64": 1
                       }
                     },
                     {
@@ -2496,6 +2487,18 @@
                         },
                         "val": {
                           "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM"
+                        }
+                      },
+                      {
+                        "key": {
+                          "vec": [
+                            {
+                              "symbol": "BotNft"
+                            }
+                          ]
+                        },
+                        "val": {
+                          "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
                         }
                       },
                       {
@@ -2623,7 +2626,7 @@
                         "symbol": "listed_at"
                       },
                       "val": {
-                        "u64": 3600
+                        "u64": 12960000
                       }
                     },
                     {
@@ -2782,7 +2785,7 @@
                             "symbol": "purchased_at"
                           },
                           "val": {
-                            "u64": 3600
+                            "u64": 12960000
                           }
                         },
                         {
@@ -3459,6 +3462,9 @@
               "vec": [
                 {
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM"
+                },
+                {
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
                 },
                 {
                   "u64": 100
@@ -4657,11 +4663,9 @@
                 },
                 {
                   "key": {
-                    "symbol": "name"
+                    "symbol": "nickname"
                   },
-                  "val": {
-                    "string": "Basic Bot"
-                  }
+                  "val": "void"
                 },
                 {
                   "key": {
@@ -4771,11 +4775,9 @@
                 },
                 {
                   "key": {
-                    "symbol": "name"
+                    "symbol": "nickname"
                   },
-                  "val": {
-                    "string": "Basic Bot"
-                  }
+                  "val": "void"
                 },
                 {
                   "key": {
@@ -5193,11 +5195,9 @@
                 },
                 {
                   "key": {
-                    "symbol": "name"
+                    "symbol": "nickname"
                   },
-                  "val": {
-                    "string": "Basic Bot"
-                  }
+                  "val": "void"
                 },
                 {
                   "key": {
@@ -5307,11 +5307,9 @@
                 },
                 {
                   "key": {
-                    "symbol": "name"
+                    "symbol": "nickname"
                   },
-                  "val": {
-                    "string": "Basic Bot"
-                  }
+                  "val": "void"
                 },
                 {
                   "key": {
@@ -5421,11 +5419,9 @@
                 },
                 {
                   "key": {
-                    "symbol": "name"
+                    "symbol": "nickname"
                   },
-                  "val": {
-                    "string": "Basic Bot"
-                  }
+                  "val": "void"
                 },
                 {
                   "key": {
@@ -5575,14 +5571,56 @@
               }
             ],
             "data": {
-              "vec": [
-                {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOLZM"
-                },
-                {
-                  "u64": 3600
-                }
-              ]
+              "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOLZM"
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000005",
+        "type_": "diagnostic",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "fn_call"
+              },
+              {
+                "bytes": "0000000000000000000000000000000000000000000000000000000000000003"
+              },
+              {
+                "symbol": "get_user_total_rate"
+              }
+            ],
+            "data": {
+              "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOLZM"
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000003",
+        "type_": "diagnostic",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "fn_return"
+              },
+              {
+                "symbol": "get_user_total_rate"
+              }
+            ],
+            "data": {
+              "u64": 1
             }
           }
         }
@@ -5652,14 +5690,56 @@
               }
             ],
             "data": {
-              "vec": [
-                {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAARQG5"
-                },
-                {
-                  "u64": 3600
-                }
-              ]
+              "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAARQG5"
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000005",
+        "type_": "diagnostic",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "fn_call"
+              },
+              {
+                "bytes": "0000000000000000000000000000000000000000000000000000000000000003"
+              },
+              {
+                "symbol": "get_user_total_rate"
+              }
+            ],
+            "data": {
+              "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAARQG5"
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000003",
+        "type_": "diagnostic",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "fn_return"
+              },
+              {
+                "symbol": "get_user_total_rate"
+              }
+            ],
+            "data": {
+              "u64": 1
             }
           }
         }
@@ -7104,7 +7184,7 @@
                     "symbol": "last_claim_ts"
                   },
                   "val": {
-                    "u64": 3600
+                    "u64": 12960000
                   }
                 },
                 {
@@ -7360,7 +7440,7 @@
                     "symbol": "bonus_bps"
                   },
                   "val": {
-                    "u32": 80
+                    "u32": 28
                   }
                 },
                 {
@@ -7376,16 +7456,14 @@
                     "symbol": "minted_at"
                   },
                   "val": {
-                    "u64": 3600
+                    "u64": 12960000
                   }
                 },
                 {
                   "key": {
-                    "symbol": "name"
+                    "symbol": "nickname"
                   },
-                  "val": {
-                    "string": "Gold Bot"
-                  }
+                  "val": "void"
                 },
                 {
                   "key": {
@@ -7408,7 +7486,7 @@
                     "symbol": "variant"
                   },
                   "val": {
-                    "u32": 4
+                    "u32": 7
                   }
                 }
               ]
@@ -7944,7 +8022,7 @@
                     "symbol": "bonus_bps"
                   },
                   "val": {
-                    "u32": 80
+                    "u32": 28
                   }
                 },
                 {
@@ -7960,16 +8038,14 @@
                     "symbol": "minted_at"
                   },
                   "val": {
-                    "u64": 3600
+                    "u64": 12960000
                   }
                 },
                 {
                   "key": {
-                    "symbol": "name"
+                    "symbol": "nickname"
                   },
-                  "val": {
-                    "string": "Gold Bot"
-                  }
+                  "val": "void"
                 },
                 {
                   "key": {
@@ -7992,7 +8068,7 @@
                     "symbol": "variant"
                   },
                   "val": {
-                    "u32": 4
+                    "u32": 7
                   }
                 }
               ]
@@ -8200,7 +8276,7 @@
                     "symbol": "bonus_bps"
                   },
                   "val": {
-                    "u32": 80
+                    "u32": 28
                   }
                 },
                 {
@@ -8216,16 +8292,14 @@
                     "symbol": "minted_at"
                   },
                   "val": {
-                    "u64": 3600
+                    "u64": 12960000
                   }
                 },
                 {
                   "key": {
-                    "symbol": "name"
+                    "symbol": "nickname"
                   },
-                  "val": {
-                    "string": "Gold Bot"
-                  }
+                  "val": "void"
                 },
                 {
                   "key": {
@@ -8248,7 +8322,7 @@
                     "symbol": "variant"
                   },
                   "val": {
-                    "u32": 4
+                    "u32": 7
                   }
                 }
               ]
@@ -8399,7 +8473,7 @@
                     "symbol": "listed_at"
                   },
                   "val": {
-                    "u64": 3600
+                    "u64": 12960000
                   }
                 },
                 {
@@ -8517,7 +8591,7 @@
                     "symbol": "bonus_bps"
                   },
                   "val": {
-                    "u32": 80
+                    "u32": 28
                   }
                 },
                 {
@@ -8533,16 +8607,14 @@
                     "symbol": "minted_at"
                   },
                   "val": {
-                    "u64": 3600
+                    "u64": 12960000
                   }
                 },
                 {
                   "key": {
-                    "symbol": "name"
+                    "symbol": "nickname"
                   },
-                  "val": {
-                    "string": "Gold Bot"
-                  }
+                  "val": "void"
                 },
                 {
                   "key": {
@@ -8565,7 +8637,7 @@
                     "symbol": "variant"
                   },
                   "val": {
-                    "u32": 4
+                    "u32": 7
                   }
                 }
               ]
@@ -8639,7 +8711,7 @@
                         "symbol": "listed_at"
                       },
                       "val": {
-                        "u64": 3600
+                        "u64": 12960000
                       }
                     },
                     {
@@ -8998,7 +9070,7 @@
                     "symbol": "bonus_bps"
                   },
                   "val": {
-                    "u32": 80
+                    "u32": 28
                   }
                 },
                 {
@@ -9014,16 +9086,14 @@
                     "symbol": "minted_at"
                   },
                   "val": {
-                    "u64": 3600
+                    "u64": 12960000
                   }
                 },
                 {
                   "key": {
-                    "symbol": "name"
+                    "symbol": "nickname"
                   },
-                  "val": {
-                    "string": "Gold Bot"
-                  }
+                  "val": "void"
                 },
                 {
                   "key": {
@@ -9046,7 +9116,7 @@
                     "symbol": "variant"
                   },
                   "val": {
-                    "u32": 4
+                    "u32": 7
                   }
                 }
               ]
@@ -9433,7 +9503,7 @@
                     "symbol": "bonus_bps"
                   },
                   "val": {
-                    "u32": 80
+                    "u32": 28
                   }
                 },
                 {
@@ -9449,16 +9519,14 @@
                     "symbol": "minted_at"
                   },
                   "val": {
-                    "u64": 3600
+                    "u64": 12960000
                   }
                 },
                 {
                   "key": {
-                    "symbol": "name"
+                    "symbol": "nickname"
                   },
-                  "val": {
-                    "string": "Gold Bot"
-                  }
+                  "val": "void"
                 },
                 {
                   "key": {
@@ -9481,7 +9549,7 @@
                     "symbol": "variant"
                   },
                   "val": {
-                    "u32": 4
+                    "u32": 7
                   }
                 }
               ]
@@ -9744,7 +9812,7 @@
                     "symbol": "listed_at"
                   },
                   "val": {
-                    "u64": 3600
+                    "u64": 12960000
                   }
                 },
                 {
@@ -10337,7 +10405,7 @@
                     "symbol": "last_claim_ts"
                   },
                   "val": {
-                    "u64": 3600
+                    "u64": 12960000
                   }
                 },
                 {
@@ -10411,7 +10479,7 @@
                     "symbol": "last_claim_ts"
                   },
                   "val": {
-                    "u64": 3600
+                    "u64": 12960000
                   }
                 },
                 {

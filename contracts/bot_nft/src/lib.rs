@@ -100,7 +100,7 @@ pub struct StoredBotNFT {
     pub tier: BotTier,
     pub owner: Address,
     pub minted_at: u64,
-    pub name: String,
+    pub nickname: Option<String>,
     pub variant: u32,
     pub bonus_bps: u32,
 }
@@ -377,7 +377,7 @@ impl BotNFTContract {
             tier: bot.tier,
             owner: to.clone(),
             minted_at: bot.minted_at,
-            name: bot.name,
+            nickname: bot.nickname,
             variant: bot.variant,
             bonus_bps: bot.bonus_bps,
         };
@@ -531,7 +531,7 @@ impl BotNFTContract {
                         tier: b.tier,
                         owner: b.owner,
                         minted_at: b.minted_at,
-                        name: b.name,
+                        nickname: b.nickname,
                         variant: b.variant,
                         bonus_bps: b.bonus_bps,
                     }
@@ -550,7 +550,7 @@ impl BotNFTContract {
             owner: stored.owner,
             accrual_rate: effective_rate,
             minted_at: stored.minted_at,
-            name: stored.name,
+            nickname: stored.nickname,
             variant: stored.variant,
             bonus_bps: stored.bonus_bps,
         })

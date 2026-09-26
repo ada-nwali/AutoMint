@@ -5,11 +5,8 @@ import {
   xdr,
 } from "@stellar/stellar-sdk";
 import {
-  REGISTRY_CONTRACT_ID,
-  BOT_NFT_CONTRACT_ID,
-  MARKETPLACE_CONTRACT_ID,
-  TOKEN_CONTRACT_ID,
-  ACCRUAL_CONTRACT_ID,
+  CONTRACT_ADDRESSES,
+  type ContractName,
   BASE_FEE,
   TX_TIMEOUT,
   STELLAR_NETWORK_PASSPHRASE,
@@ -335,7 +332,7 @@ export function parseListing(
  */
 export async function getAmtBalance(userAddress: string): Promise<bigint> {
   const balance = await simulateContractCall<bigint>(
-    TOKEN_CONTRACT_ID,
+    CONTRACT_ADDRESSES.token,
     "balance",
     [nativeToScVal(userAddress, { type: "address" })],
     userAddress
@@ -349,7 +346,7 @@ export async function getAmtBalance(userAddress: string): Promise<bigint> {
  */
 export async function getAmtDecimals(sourceAddress?: string): Promise<number> {
   const raw = await simulateContractCall<number | bigint>(
-    TOKEN_CONTRACT_ID,
+    CONTRACT_ADDRESSES.token,
     "decimals",
     [],
     defaultSource(sourceAddress)
@@ -374,7 +371,7 @@ export function buildListBotArgs(
   seller: string,
   botId: bigint,
   price: bigint,
-  currency: string = TOKEN_CONTRACT_ID
+  currency: string = CONTRACT_ADDRESSES.token
 ): xdr.ScVal[] {
   return [
     addressToScVal(seller),
@@ -392,10 +389,10 @@ export async function listBot(
   userAddress: string,
   botId: bigint,
   price: bigint,
-  currency: string = TOKEN_CONTRACT_ID
+  currency: string = CONTRACT_ADDRESSES.token
 ): Promise<string> {
   return buildTxXdr(
-    MARKETPLACE_CONTRACT_ID,
+    CONTRACT_ADDRESSES.marketplace,
     "list_bot",
     buildListBotArgs(userAddress, botId, price, currency),
     userAddress
@@ -408,7 +405,7 @@ export async function listBot(
  */
 export async function buyBot(address: string, listingId: bigint): Promise<string> {
   return buildTxXdr(
-    MARKETPLACE_CONTRACT_ID,
+    CONTRACT_ADDRESSES.marketplace,
     "buy_bot",
     [nativeToScVal(listingId, { type: "u128" })],
     address
@@ -427,7 +424,7 @@ export async function getLeaderboard(
   sourceAddress?: string
 ): Promise<UserProfile[]> {
   const raw = await simulateContractCall<Record<string, unknown>[]>(
-    REGISTRY_CONTRACT_ID,
+    CONTRACT_ADDRESSES.registry,
     "get_leaderboard",
     [nativeToScVal(limit, { type: "u32" })],
     defaultSource(sourceAddress)
@@ -483,7 +480,7 @@ async function getRegistryRank(
 ): Promise<number | null> {
   try {
     const raw = await simulateContractCall<number | bigint>(
-      REGISTRY_CONTRACT_ID,
+      CONTRACT_ADDRESSES.registry,
       "get_rank",
       [nativeToScVal(userAddress, { type: "address" })],
       sourceAddress
@@ -553,7 +550,7 @@ export async function getUserRank(
  */
 export async function mintTierBot(address: string, tier: string, token: string): Promise<string> {
   return buildTxXdr(
-    BOT_NFT_CONTRACT_ID,
+    CONTRACT_ADDRESSES.botNft,
     "mint_tier",
     [
       nativeToScVal(address, { type: "address" }),
@@ -573,7 +570,7 @@ export async function cancelListing(
   listingId: bigint
 ): Promise<string> {
   return buildTxXdr(
-    MARKETPLACE_CONTRACT_ID,
+    CONTRACT_ADDRESSES.marketplace,
     "cancel_listing",
     [nativeToScVal(listingId, { type: "u128" })],
     userAddress
@@ -594,7 +591,7 @@ export async function getActiveListings(
   sourceAddress?: string
 ): Promise<MarketplaceListing[]> {
   const listingsRaw = await simulateContractCall<Record<string, unknown>[]>(
-    MARKETPLACE_CONTRACT_ID,
+    CONTRACT_ADDRESSES.marketplace,
     "get_active_listings",
     [
       nativeToScVal(start, { type: "u64" }),
@@ -621,7 +618,7 @@ export async function getUserListings(
   userAddress: string
 ): Promise<MarketplaceListing[]> {
   const listingsRaw = await simulateContractCall<Record<string, unknown>[]>(
-    MARKETPLACE_CONTRACT_ID,
+    CONTRACT_ADDRESSES.marketplace,
     "get_user_listings",
     [nativeToScVal(userAddress, { type: "address" })],
     userAddress
@@ -644,7 +641,7 @@ export async function getUserListings(
  */
 export async function isRegistered(userAddress: string): Promise<boolean> {
   const result = await simulateContractCall<boolean>(
-    REGISTRY_CONTRACT_ID,
+    CONTRACT_ADDRESSES.registry,
     "is_registered",
     [nativeToScVal(userAddress, { type: "address" })],
     userAddress
@@ -662,7 +659,7 @@ export async function isRegistered(userAddress: string): Promise<boolean> {
  */
 export async function getTotalUsers(sourceAddress?: string): Promise<number> {
   const result = await simulateContractCall<number | bigint>(
-    REGISTRY_CONTRACT_ID,
+    CONTRACT_ADDRESSES.registry,
     "total_users",
     [],
     defaultSource(sourceAddress)
@@ -679,7 +676,7 @@ export async function getTotalUsers(sourceAddress?: string): Promise<number> {
  */
 export async function registerUser(userAddress: string, username: string): Promise<string> {
   return buildTxXdr(
-    REGISTRY_CONTRACT_ID,
+    CONTRACT_ADDRESSES.registry,
     "register",
     [
       nativeToScVal(userAddress, { type: "address" }),
@@ -694,7 +691,7 @@ export async function registerUser(userAddress: string, username: string): Promi
  */
 export async function mintBasicBot(userAddress: string): Promise<string> {
   return buildTxXdr(
-    BOT_NFT_CONTRACT_ID,
+    CONTRACT_ADDRESSES.botNft,
     "mint_basic",
     [nativeToScVal(userAddress, { type: "address" })],
     userAddress
@@ -708,7 +705,7 @@ export async function mintBasicBot(userAddress: string): Promise<string> {
 export async function bumpBot(botId: bigint, sourceAddress?: string): Promise<string> {
   const source = defaultSource(sourceAddress);
   return buildTxXdr(
-    BOT_NFT_CONTRACT_ID,
+    CONTRACT_ADDRESSES.botNft,
     "bump_bot",
     [nativeToScVal(botId, { type: "u64" })],
     source
@@ -722,7 +719,7 @@ export async function bumpBot(botId: bigint, sourceAddress?: string): Promise<st
 export async function bumpUserBots(userAddress: string, sourceAddress?: string): Promise<string> {
   const source = defaultSource(sourceAddress ?? userAddress);
   return buildTxXdr(
-    BOT_NFT_CONTRACT_ID,
+    CONTRACT_ADDRESSES.botNft,
     "bump_user_bots",
     [nativeToScVal(userAddress, { type: "address" })],
     source
@@ -738,7 +735,7 @@ export async function getBotsByTier(
   sourceAddress?: string
 ): Promise<bigint[]> {
   const raw = await simulateContractCall(
-    BOT_NFT_CONTRACT_ID,
+    CONTRACT_ADDRESSES.botNft,
     "get_bots_by_tier",
     [
       nativeToScVal(tier, { type: "symbol" }),
@@ -753,16 +750,14 @@ export async function getBotsByTier(
 }
 
 /**
- * Start accrual for a user in the accrual contract.
+ * Start accrual for a user in the accrual contract. The contract derives the
+ * rate from the user's bots (#319).
  */
-export async function startAccrual(userAddress: string, rate: number): Promise<string> {
+export async function startAccrual(userAddress: string): Promise<string> {
   return buildTxXdr(
-    ACCRUAL_CONTRACT_ID,
+    CONTRACT_ADDRESSES.accrual,
     "start_accrual",
-    [
-      nativeToScVal(userAddress, { type: "address" }),
-      nativeToScVal(rate, { type: "u32" }),
-    ],
+    [nativeToScVal(userAddress, { type: "address" })],
     userAddress
   );
 }
@@ -779,7 +774,7 @@ export async function getAccrualState(userAddress: string): Promise<AccrualState
   let stateRaw: Record<string, unknown> | null | undefined;
   try {
     stateRaw = await simulateContractCall<Record<string, unknown> | null>(
-      ACCRUAL_CONTRACT_ID,
+      CONTRACT_ADDRESSES.accrual,
       "get_accrual_state",
       [nativeToScVal(userAddress, { type: "address" })],
       userAddress
@@ -836,7 +831,7 @@ export async function getAccrualConfig(
  */
 export async function getPendingPoints(userAddress: string): Promise<bigint> {
   const raw = await simulateContractCall<bigint | number>(
-    ACCRUAL_CONTRACT_ID,
+    CONTRACT_ADDRESSES.accrual,
     "pending_points",
     [nativeToScVal(userAddress, { type: "address" })],
     userAddress
@@ -850,12 +845,12 @@ export async function getPendingPoints(userAddress: string): Promise<bigint> {
  */
 export async function claimPoints(userAddress: string): Promise<string> {
   return buildTxXdr(
-    ACCRUAL_CONTRACT_ID,
+    CONTRACT_ADDRESSES.accrual,
     "claim",
     [
       nativeToScVal(userAddress, { type: "address" }),
-      nativeToScVal(TOKEN_CONTRACT_ID, { type: "address" }),
-      nativeToScVal(REGISTRY_CONTRACT_ID, { type: "address" }),
+      nativeToScVal(CONTRACT_ADDRESSES.token, { type: "address" }),
+      nativeToScVal(CONTRACT_ADDRESSES.registry, { type: "address" }),
     ],
     userAddress
   );
@@ -907,7 +902,7 @@ export async function getUserProfile(userAddress: string): Promise<UserProfile |
   let profileRaw: Record<string, unknown> | null | undefined;
   try {
     profileRaw = await simulateContractCall<Record<string, unknown> | null>(
-      REGISTRY_CONTRACT_ID,
+      CONTRACT_ADDRESSES.registry,
       "get_user",
       [nativeToScVal(userAddress, { type: "address" })],
       userAddress
@@ -926,7 +921,7 @@ export async function getUserProfile(userAddress: string): Promise<UserProfile |
  */
 export async function getUserBots(userAddress: string): Promise<bigint[]> {
   const raw = await simulateContractCall<unknown[]>(
-    BOT_NFT_CONTRACT_ID,
+    CONTRACT_ADDRESSES.botNft,
     "get_user_bots",
     [nativeToScVal(userAddress, { type: "address" })],
     userAddress
@@ -943,7 +938,7 @@ export async function getUserBots(userAddress: string): Promise<bigint[]> {
  */
 export async function getUserBotsDetailed(userAddress: string): Promise<BotNFT[]> {
   const raw = await simulateContractCall<Record<string, unknown>[]>(
-    BOT_NFT_CONTRACT_ID,
+    CONTRACT_ADDRESSES.botNft,
     "get_user_bots_detailed",
     [nativeToScVal(userAddress, { type: "address" })],
     userAddress
@@ -958,7 +953,7 @@ export async function getUserBotsDetailed(userAddress: string): Promise<BotNFT[]
  */
 export async function getBotById(userAddress: string, botId: bigint): Promise<BotNFT | null> {
   const raw = await simulateContractCall<Record<string, unknown> | null>(
-    BOT_NFT_CONTRACT_ID,
+    CONTRACT_ADDRESSES.botNft,
     "get_bot",
     [nativeToScVal(botId, { type: "u64" })],
     userAddress
@@ -972,7 +967,7 @@ export async function getBotById(userAddress: string, botId: bigint): Promise<Bo
  */
 export async function getUserTotalRate(userAddress: string): Promise<bigint> {
   const raw = await simulateContractCall<bigint | number>(
-    BOT_NFT_CONTRACT_ID,
+    CONTRACT_ADDRESSES.botNft,
     "get_user_total_rate",
     [nativeToScVal(userAddress, { type: "address" })],
     userAddress
@@ -986,7 +981,7 @@ export async function getUserTotalRate(userAddress: string): Promise<bigint> {
  */
 export async function getNextBotId(sourceAddress?: string): Promise<bigint> {
   const source = defaultSource(sourceAddress);
-  const raw = await simulateContractCall(BOT_NFT_CONTRACT_ID, "next_id", [], source);
+  const raw = await simulateContractCall(CONTRACT_ADDRESSES.botNft, "next_id", [], source);
   return toBigInt(raw, "next_id");
 }
 
@@ -1001,7 +996,7 @@ export async function getBotsRange(
 ): Promise<BotNFT[]> {
   const source = defaultSource(sourceAddress);
   const raw = await simulateContractCall(
-    BOT_NFT_CONTRACT_ID,
+    CONTRACT_ADDRESSES.botNft,
     "get_bots_range",
     [nativeToScVal(startId, { type: "u64" }), nativeToScVal(limit, { type: "u32" })],
     source
@@ -1024,7 +1019,7 @@ export async function getAllTiers(sourceAddress?: string): Promise<Record<BotTie
   const tiers = await Promise.all(
     TIER_ORDER.map(async (tier, index): Promise<TierInfo> => {
       const raw = await simulateContractCall<unknown[]>(
-        BOT_NFT_CONTRACT_ID,
+        CONTRACT_ADDRESSES.botNft,
         "get_tier_info",
         [nativeToScVal(index, { type: "u32" })],
         source
@@ -1072,8 +1067,7 @@ export async function getAllTiers(sourceAddress?: string): Promise<Record<BotTie
 export type PreflightKind = "ok" | "unreachable-rpc" | "contract-not-found";
 
 export interface ContractPreflightResult {
-  /** Key in CONTRACT_ADDRESSES (registry, botNft, accrual, marketplace, token). */
-  name: string;
+  name: ContractName;
   contractId: string;
   ok: boolean;
   kind: PreflightKind;
@@ -1147,13 +1141,7 @@ export function preflight(sourceAddress?: string): Promise<PreflightReport> {
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err);
       const all: ContractPreflightResult[] = (
-        [
-          ["registry", REGISTRY_CONTRACT_ID],
-          ["botNft", BOT_NFT_CONTRACT_ID],
-          ["accrual", ACCRUAL_CONTRACT_ID],
-          ["marketplace", MARKETPLACE_CONTRACT_ID],
-          ["token", TOKEN_CONTRACT_ID],
-        ] as Array<[string, string]>
+        Object.entries(CONTRACT_ADDRESSES) as Array<[ContractName, string]>
       ).map(([name, contractId]) => ({
         name,
         contractId,
@@ -1165,16 +1153,16 @@ export function preflight(sourceAddress?: string): Promise<PreflightReport> {
     }
 
     const checks: Array<{
-      name: string;
+      name: ContractName;
       contractId: string;
       method: string;
       args: xdr.ScVal[];
     }> = [
-      { name: "registry", contractId: REGISTRY_CONTRACT_ID, method: "total_users", args: [] },
-      { name: "botNft", contractId: BOT_NFT_CONTRACT_ID, method: "admin", args: [] },
-      { name: "accrual", contractId: ACCRUAL_CONTRACT_ID, method: "get_accrual_admin", args: [] },
-      { name: "marketplace", contractId: MARKETPLACE_CONTRACT_ID, method: "next_listing_id", args: [] },
-      { name: "token", contractId: TOKEN_CONTRACT_ID, method: "decimals", args: [] },
+      { name: "registry", contractId: CONTRACT_ADDRESSES.registry, method: "total_users", args: [] },
+      { name: "botNft", contractId: CONTRACT_ADDRESSES.botNft, method: "admin", args: [] },
+      { name: "accrual", contractId: CONTRACT_ADDRESSES.accrual, method: "get_accrual_admin", args: [] },
+      { name: "marketplace", contractId: CONTRACT_ADDRESSES.marketplace, method: "next_listing_id", args: [] },
+      { name: "token", contractId: CONTRACT_ADDRESSES.token, method: "decimals", args: [] },
     ];
 
     const results = await Promise.all(

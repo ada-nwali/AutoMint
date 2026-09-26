@@ -15,8 +15,11 @@ jest.mock("../constants", () => {
     ...jest.requireActual("../constants"),
     // The placeholder defaults are not valid strkeys; the real Contract and
     // Address encoders validate their checksum.
-    MARKETPLACE_CONTRACT_ID: StrKey.encodeContract(Buffer.alloc(32, 1)),
-    TOKEN_CONTRACT_ID: StrKey.encodeContract(Buffer.alloc(32, 2)),
+    CONTRACT_ADDRESSES: {
+      ...jest.requireActual("../constants").CONTRACT_ADDRESSES,
+      marketplace: StrKey.encodeContract(Buffer.alloc(32, 1)),
+      token: StrKey.encodeContract(Buffer.alloc(32, 2)),
+    },
   };
 });
 
@@ -33,7 +36,9 @@ jest.mock("../stellar", () => ({
 
 import { Account, Contract, Keypair, StrKey, scValToNative } from "@stellar/stellar-sdk";
 import { buildListBotArgs, listBot } from "../contracts";
-import { MARKETPLACE_CONTRACT_ID, TOKEN_CONTRACT_ID } from "../constants";
+import { CONTRACT_ADDRESSES } from "../constants";
+
+const { marketplace: MARKETPLACE_CONTRACT_ID, token: TOKEN_CONTRACT_ID } = CONTRACT_ADDRESSES;
 
 const SELLER = Keypair.random().publicKey();
 const OTHER_CURRENCY = StrKey.encodeContract(Buffer.alloc(32, 9));
