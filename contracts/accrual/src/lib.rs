@@ -355,8 +355,13 @@ impl AccrualContract {
         let elapsed = env
             .ledger()
             .timestamp()
-            .saturating_sub(accrual.last_claim_ts) as u128;
-        Ok((elapsed.saturating_mul(accrual.rate as u128) + accrual.leftover as u128) / 3600)
+            .saturating_sub(accrual.last_claim_ts);
+        // Same arithmetic as `claim` and `settle`: whole points plus the carried
+        // sub-hour remainder, saturating like they do.
+        Ok(elapsed
+            .saturating_mul(accrual.rate)
+            .saturating_add(accrual.leftover)
+            / 3600)
     }
 
     /// Seconds until the next AMT token will be earned. Returns 0 if the user
@@ -557,8 +562,9 @@ impl AccrualContract {
         let updated_accrual = UserAccrual {
             user: accrual.user,
             rate: accrual.rate,
-            last_claim_ts: next_last_claim_ts,
-            total_claimed_points: remaining_points,
+            last_claim_ts: current_ts,
+            carry_points: remaining_carry,
+            lifetime_points: updated_lifetime,
             started_at: accrual.started_at,
             leftover,
         };
@@ -617,6 +623,9 @@ impl AccrualContract {
             (pending, remaining_carry, updated_lifetime),
         );
 
+        // Release the guard on the success path; a failed invocation rolls
+        // the temporary entry back on its own.
+        env.storage().temporary().remove(&DataKey::ReentrancyGuard);
         Ok(pending)
     }
 
@@ -640,18 +649,21 @@ impl AccrualContract {
         let old_val = current_config.points_per_amt;
 
         // Bound changes to at most 2x jump in either direction
-        if points_per_amt > old_val.saturating_mul(2) || points_per_amt.saturating_mul(2) < old_val {
+        if points_per_amt > old_val.saturating_mul(2) || points_per_amt.saturating_mul(2) < old_val
+        {
             return Err(AccrualError::InvalidConfig);
         }
 
-        env.storage()
-            .instance()
-            .set(&DataKey::Config, &Config { points_per_amt });
-
-        env.events().publish(
-            (symbol_short!("cfg_upd"), admin),
-            (old_val, points_per_amt),
+        env.storage().instance().set(
+            &DataKey::Config,
+            &Config {
+                points_per_amt,
+                amt_scale: current_config.amt_scale,
+            },
         );
+
+        env.events()
+            .publish((symbol_short!("cfg_upd"), admin), (old_val, points_per_amt));
 
         Ok(())
     }
@@ -1151,7 +1163,7 @@ mod test {
         let expected = 1 + gold.accrual_rate;
         assert!((101..=106).contains(&expected));
         env.ledger().with_mut(|l| l.timestamp += HOUR);
-        assert_eq!(client.pending_points(&user), expected as u128);
+        assert_eq!(client.pending_points(&user), expected);
     }
 
     #[test]

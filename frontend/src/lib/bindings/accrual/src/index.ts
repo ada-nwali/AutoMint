@@ -115,7 +115,7 @@ export interface Client {
      * Whether to automatically simulate the transaction when constructing the AssembledTransaction. Default: true
      */
     simulate?: boolean;
-  }) => Promise<AssembledTransaction<Result<i128>>>
+  }) => Promise<AssembledTransaction<Result<u64>>>
 
   /**
    * Construct and simulate a config transaction. Returns an `AssembledTransaction` object which will have a `result` field containing the result of the simulation. If this transaction changes contract state, you will need to call `signAndSend()` on the returned object.
@@ -319,7 +319,7 @@ export interface Client {
      * Whether to automatically simulate the transaction when constructing the AssembledTransaction. Default: true
      */
     simulate?: boolean;
-  }) => Promise<AssembledTransaction<Result<u128>>>
+  }) => Promise<AssembledTransaction<Result<u64>>>
 
   /**
    * Construct and simulate a get_accrual_admin transaction. Returns an `AssembledTransaction` object which will have a `result` field containing the result of the simulation. If this transaction changes contract state, you will need to call `signAndSend()` on the returned object.
@@ -385,6 +385,26 @@ export interface Client {
   }) => Promise<AssembledTransaction<Result<Array<Option<AccrualState>>>>>
 
   /**
+   * Construct and simulate a set_points_per_amt transaction. Returns an `AssembledTransaction` object which will have a `result` field containing the result of the simulation. If this transaction changes contract state, you will need to call `signAndSend()` on the returned object.
+   */
+  set_points_per_amt: ({points_per_amt}: {points_per_amt: u64}, options?: {
+    /**
+     * The fee to pay for the transaction. Default: BASE_FEE
+     */
+    fee?: number;
+
+    /**
+     * The maximum amount of time to wait for the transaction to complete. Default: DEFAULT_TIMEOUT
+     */
+    timeoutInSeconds?: number;
+
+    /**
+     * Whether to automatically simulate the transaction when constructing the AssembledTransaction. Default: true
+     */
+    simulate?: boolean;
+  }) => Promise<AssembledTransaction<Result<void>>>
+
+  /**
    * Construct and simulate a seconds_to_next_amt transaction. Returns an `AssembledTransaction` object which will have a `result` field containing the result of the simulation. If this transaction changes contract state, you will need to call `signAndSend()` on the returned object.
    * Seconds until the next AMT token will be earned. Returns 0 if the user
    * already has enough carry points for the next token or if their rate is 0.
@@ -411,7 +431,7 @@ export interface Client {
 export class Client extends ContractClient {
   constructor(public readonly options: ContractClientOptions) {
     super(
-      new ContractSpec([ "AAAAAAAAAAAAAAAFY2xhaW0AAAAAAAADAAAAAAAAAAR1c2VyAAAAEwAAAAAAAAAOdG9rZW5fY29udHJhY3QAAAAAABMAAAAAAAAACHJlZ2lzdHJ5AAAAEwAAAAEAAAPpAAAACwAAB9AAAAAMQWNjcnVhbEVycm9y",
+      new ContractSpec([ "AAAAAAAAAAAAAAAFY2xhaW0AAAAAAAADAAAAAAAAAAR1c2VyAAAAEwAAAAAAAAAOdG9rZW5fY29udHJhY3QAAAAAABMAAAAAAAAACHJlZ2lzdHJ5AAAAEwAAAAEAAAPpAAAABgAAB9AAAAAMQWNjcnVhbEVycm9y",
         "AAAAAAAAAAAAAAAGY29uZmlnAAAAAAAAAAAAAQAAA+kAAAfQAAAABkNvbmZpZwAAAAAH0AAAAAxBY2NydWFsRXJyb3I=",
         "AAAAAAAAAAAAAAAGZnJlZXplAAAAAAABAAAAAAAAAAR1c2VyAAAAEwAAAAEAAAPpAAAD7QAAAAAAAAfQAAAADEFjY3J1YWxFcnJvcg==",
         "AAAAAAAABABTZXR0bGUgYWNjcnVlZCBwb2ludHMgZm9yIHVwIHRvIGBNQVhfU0VUVExFX1VTRVJTYCB1c2VycyBpbiBvbmUgY2FsbCwKd2l0aG91dCBtaW50aW5nIGFuZCB3aXRob3V0IGFueSB1c2VyJ3Mgc2lnbmF0dXJlICgjNDE0KS4KCkZvciBlYWNoIHVzZXIgdGhpcyBkb2VzIGV4YWN0bHkgd2hhdCBgY2xhaW1gIGRvZXMgdXAgdG8gdGhlIG1pbnQ6CnRoZSBwb2ludHMgZWFybmVkIHNpbmNlIGBsYXN0X2NsYWltX3RzYCAocGx1cyB0aGUgY2FycmllZCBzdWItaG91cgpyZW1haW5kZXIpIGFyZSBjcmVkaXRlZCB0byB0aGUgcmVnaXN0cnksIGFkZGVkIHRvIGBjYXJyeV9wb2ludHNgIGFuZApgbGlmZXRpbWVfcG9pbnRzYCwgYW5kIGBsYXN0X2NsYWltX3RzYCBtb3ZlcyB0byBub3cuIFRoZSB1c2VyJ3MgbmV4dApgY2xhaW1gIHRoZW4gbWludHMgZnJvbSB0aGUgY2FycmllZCBiYWxhbmNlLCBzbyBhIHNldHRsZWQgdXNlciBlbmRzIHVwCndpdGggdGhlIHNhbWUgcG9pbnRzIGFuZCB0aGUgc2FtZSBBTVQgYXMgYW4gdW5zZXR0bGVkIG9uZS4KCldoeSB0aGlzIGlzIHNhZmUgdG8gbGVhdmUgcGVybWlzc2lvbmxlc3M6IHNldHRsaW5nIG5ldmVyIG1vdmVzIHZhbHVlCm91dCBvZiB0aGUgc3lzdGVtIGFuZCBuZXZlciByZWR1Y2VzIHdoYXQgYSB1c2VyIGlzIG93ZWQuIFRoZSBwZW5kaW5nCmFtb3VudCBpcyBhIHB1cmUgZnVuY3Rpb24gb2Ygc3RvcmVkIHN0YXRlIGFuZCB0aGUgbGVkZ2VyIGNsb2NrLCBpdCBpcwpjcmVkaXRlZCB0byB0aGUgdXNlcidzIG93biByZWdpc3RyeSBwcm9maWxlLCBhbmQgdGhlIG9ubHkgZmllbGQgYQpjYWxsZXIgY2FuIGluZmx1ZW5jZSBpcyAqd2hlbiogdGhlIGNyZWRpdCBpcyByZWNvcmRlZCwgd2hpY2ggYGNsYWltYAp3b3VsZCByZWNvcmQgaWRlbnRpY2FsbHkuIFRoZXJlIGlzIG5vdGhpbmcgdG8gZ2FpbiBieSBjYWxsaW5nIGl0IGVhcmx5LApsYXRlLCBvciByZXBlYXRlZGx5IChhIHJlcGVhdCB3aXRoaW4gdGhlIHNhbWUgc2Vjb25kIGNyZWRpdHMgemVybyksIGFuZAplYWNoIGNhAAAABnNldHRsZQAAAAAAAQAAAAAAAAAFdXNlcnMAAAAAAAPqAAAAEwAAAAEAAAPpAAAABAAAB9AAAAAMQWNjcnVhbEVycm9y",
@@ -423,18 +443,19 @@ export class Client extends ContractClient {
         "AAAAAAAAAAAAAAAMc3RvcF9hY2NydWFsAAAAAgAAAAAAAAAEdXNlcgAAABMAAAAAAAAACHJlZ2lzdHJ5AAAAEwAAAAEAAAPpAAAD7QAAAAAAAAfQAAAADEFjY3J1YWxFcnJvcg==",
         "AAAAAAAAAUBTdGFydHMgYWNjcnVpbmcgZm9yIGB1c2VyYCBhdCB0aGUgY29tYmluZWQgcmF0ZSBvZiB0aGUgYm90cyB0aGV5IG93biwKcmVhZCBmcm9tIHRoZSBib3RfbmZ0IGNvbnRyYWN0IOKAlCBuZXZlciBmcm9tIHRoZSBjYWxsZXIgKCMzMTkpLgoKVGhlIHVzZXIgbXVzdCBhbHJlYWR5IGJlIHJlZ2lzdGVyZWQgKCM0MTUpOiBhbiB1bnJlZ2lzdGVyZWQgYWRkcmVzcwp3b3VsZCBvdGhlcndpc2UgYWNjcnVlIHRpbWUgaXQgY2FuIG5ldmVyIGNsYWltLCBmYWlsaW5nIGxhdGVyIGluc2lkZQpgcmVnaXN0cnkuYWRkX3BvaW50c2Agd2l0aCBubyBhY3Rpb25hYmxlIGVycm9yLgAAAA1zdGFydF9hY2NydWFsAAAAAAAAAQAAAAAAAAAEdXNlcgAAABMAAAABAAAD6QAAA+0AAAAAAAAH0AAAAAxBY2NydWFsRXJyb3I=",
         "AAAAAQAAAAAAAAAAAAAAC1VzZXJBY2NydWFsAAAAAAcAAAAAAAAADGNhcnJ5X3BvaW50cwAAAAYAAAAAAAAADWxhc3RfY2xhaW1fdHMAAAAAAAAGAAAAAAAAAAhsZWZ0b3ZlcgAAAAYAAAAAAAAAD2xpZmV0aW1lX3BvaW50cwAAAAAGAAAAAAAAAARyYXRlAAAABgAAAAAAAAAKc3RhcnRlZF9hdAAAAAAABgAAAAAAAAAEdXNlcgAAABM=",
-        "AAAAAAAAAAAAAAAOcGVuZGluZ19wb2ludHMAAAAAAAEAAAAAAAAABHVzZXIAAAATAAAAAQAAA+kAAAAKAAAH0AAAAAxBY2NydWFsRXJyb3I=",
+        "AAAAAAAAAAAAAAAOcGVuZGluZ19wb2ludHMAAAAAAAEAAAAAAAAABHVzZXIAAAATAAAAAQAAA+kAAAAGAAAH0AAAAAxBY2NydWFsRXJyb3I=",
         "AAAABAAAAAAAAAAAAAAADEFjY3J1YWxFcnJvcgAAAAwAAAAAAAAAEkFscmVhZHlJbml0aWFsaXplZAAAAAAAAQAAAAAAAAAOQWxyZWFkeVN0YXJ0ZWQAAAAAAAIAAAAAAAAACk5vdFN0YXJ0ZWQAAAAAAAMAAAAAAAAADFVuYXV0aG9yaXplZAAAAAQAAAAAAAAADk5vdEluaXRpYWxpemVkAAAAAAAFAAAAAAAAABJSZWdpc3RyeUNhbGxGYWlsZWQAAAAAAAYAAAAAAAAAD1Rva2VuTWludEZhaWxlZAAAAAAHAAAAAAAAAA1JbnZhbGlkQ29uZmlnAAAAAAAACAAAAAAAAAAGTm9Cb3RzAAAAAAAJAAAAAAAAAAxUb29NYW55VXNlcnMAAAAKAAAAAAAAAA1Ob3RSZWdpc3RlcmVkAAAAAAAACwAAAAAAAAAGRnJvemVuAAAAAAAM",
         "AAAAAQAAAAAAAAAAAAAADEFjY3J1YWxTdGF0ZQAAAAUAAAAAAAAADGNhcnJ5X3BvaW50cwAAAAYAAAAAAAAADWxhc3RfY2xhaW1fdHMAAAAAAAAGAAAAAAAAAA9saWZldGltZV9wb2ludHMAAAAABgAAAAAAAAAEcmF0ZQAAAAYAAAAAAAAACnN0YXJ0ZWRfYXQAAAAAAAY=",
         "AAAAAAAAAAAAAAARZ2V0X2FjY3J1YWxfYWRtaW4AAAAAAAAAAAAAAQAAA+kAAAATAAAH0AAAAAxBY2NydWFsRXJyb3I=",
         "AAAAAAAAAAAAAAARZ2V0X2FjY3J1YWxfc3RhdGUAAAAAAAABAAAAAAAAAAR1c2VyAAAAEwAAAAEAAAPoAAAH0AAAAAxBY2NydWFsU3RhdGU=",
         "AAAAAAAAANFBY2NydWFsIHN0YXRlcyBmb3IgdXAgdG8gYE1BWF9CQVRDSF9VU0VSU2AgdXNlcnMgaW4gb25lIGNhbGwsIGluIHRoZQpzYW1lIG9yZGVyIGFzIGB1c2Vyc2AuIEFkZHJlc3NlcyB3aXRoIG5vIGFjY3J1YWwgcmVjb3JkIG1hcCB0byBgTm9uZWAuCkxldHMgYSBsZWFkZXJib2FyZCBwb2xsIG9uZSBzaW11bGF0aW9uIGluc3RlYWQgb2Ygb25lIHBlciByb3cgKCM0MjApLgAAAAAAABJnZXRfYWNjcnVhbF9zdGF0ZXMAAAAAAAEAAAAAAAAABXVzZXJzAAAAAAAD6gAAABMAAAABAAAD6QAAA+oAAAPoAAAH0AAAAAxBY2NydWFsU3RhdGUAAAfQAAAADEFjY3J1YWxFcnJvcg==",
+        "AAAAAAAAAAAAAAASc2V0X3BvaW50c19wZXJfYW10AAAAAAABAAAAAAAAAA5wb2ludHNfcGVyX2FtdAAAAAAABgAAAAEAAAPpAAAD7QAAAAAAAAfQAAAADEFjY3J1YWxFcnJvcg==",
         "AAAAAAAAAM5TZWNvbmRzIHVudGlsIHRoZSBuZXh0IEFNVCB0b2tlbiB3aWxsIGJlIGVhcm5lZC4gUmV0dXJucyAwIGlmIHRoZSB1c2VyCmFscmVhZHkgaGFzIGVub3VnaCBjYXJyeSBwb2ludHMgZm9yIHRoZSBuZXh0IHRva2VuIG9yIGlmIHRoZWlyIHJhdGUgaXMgMC4KQ29tcHV0ZWQgZnJvbSBjYXJyeV9wb2ludHMsIHBvaW50c19wZXJfYW10LCBhbmQgYWNjcnVhbCByYXRlLgAAAAAAE3NlY29uZHNfdG9fbmV4dF9hbXQAAAAAAQAAAAAAAAAEdXNlcgAAABMAAAABAAAD6QAAAAYAAAfQAAAADEFjY3J1YWxFcnJvcg==" ]),
       options
     )
   }
   public readonly fromJSON = {
-    claim: this.txFromJSON<Result<i128>>,
+    claim: this.txFromJSON<Result<u64>>,
         config: this.txFromJSON<Result<Config>>,
         freeze: this.txFromJSON<Result<void>>,
         settle: this.txFromJSON<Result<u32>>,
@@ -443,10 +464,11 @@ export class Client extends ContractClient {
         initialize: this.txFromJSON<Result<void>>,
         stop_accrual: this.txFromJSON<Result<void>>,
         start_accrual: this.txFromJSON<Result<void>>,
-        pending_points: this.txFromJSON<Result<u128>>,
+        pending_points: this.txFromJSON<Result<u64>>,
         get_accrual_admin: this.txFromJSON<Result<string>>,
         get_accrual_state: this.txFromJSON<Option<AccrualState>>,
         get_accrual_states: this.txFromJSON<Result<Array<Option<AccrualState>>>>,
+        set_points_per_amt: this.txFromJSON<Result<void>>,
         seconds_to_next_amt: this.txFromJSON<Result<u64>>
   }
 }

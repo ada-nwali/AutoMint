@@ -202,7 +202,7 @@
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOLZM"
                 },
                 {
-                  "string": "autouser0"
+                  "string": "autouser1"
                 }
               ]
             }
@@ -579,7 +579,7 @@
                         "symbol": "username"
                       },
                       "val": {
-                        "string": "autouser0"
+                        "string": "autouser1"
                       }
                     }
                   ]
@@ -601,7 +601,7 @@
                   "symbol": "Username"
                 },
                 {
-                  "string": "autouser0"
+                  "string": "autouser1"
                 }
               ]
             },
@@ -621,7 +621,7 @@
                       "symbol": "Username"
                     },
                     {
-                      "string": "autouser0"
+                      "string": "autouser1"
                     }
                   ]
                 },
@@ -2337,7 +2337,7 @@
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOLZM"
                 },
                 {
-                  "string": "autouser0"
+                  "string": "autouser1"
                 }
               ]
             }

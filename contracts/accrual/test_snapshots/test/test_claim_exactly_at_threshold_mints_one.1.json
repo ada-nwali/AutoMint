@@ -2563,7 +2563,7 @@
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOLZM"
                 },
                 {
-                  "string": "autouser11"
+                  "string": "autouser9"
                 }
               ]
             }
@@ -2653,7 +2653,7 @@
                       "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOLZM"
                     },
                     {
-                      "string": "autouser11"
+                      "string": "autouser9"
                     }
                   ]
                 }
@@ -3335,10 +3335,7 @@
               }
             ],
             "data": {
-              "i128": {
-                "hi": 0,
-                "lo": 100
-              }
+              "u64": 100
             }
           }
         }
