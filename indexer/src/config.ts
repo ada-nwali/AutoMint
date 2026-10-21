@@ -39,13 +39,39 @@ function normalizeContractId(raw: string | undefined | null): string | null {
 }
 
 /** Read `frontend/.env.local` and return KEY=VALUE pairs. */
-function readDotEnvLocal(file: string): Record<string, string> {
+export function readDotEnvLocal(file: string): Record<string, string> {
   try {
     const txt = fs.readFileSync(file, "utf8");
     const out: Record<string, string> = {};
     for (const line of txt.split("\n")) {
-      const m = line.match(/^([A-Z0-9_]+)\s*=\s*(.*)$/);
-      if (m) out[m[1]] = m[2].replace(/^["']|["']$/g, "");
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#")) continue;
+      const m = trimmed.match(/^(?:export\s+)?([A-Za-z0-9_]+)\s*=\s*(.*)$/);
+      if (!m) continue;
+      const key = m[1];
+      let val = m[2].trim();
+
+      if (val.startsWith('"')) {
+        const endQuote = val.indexOf('"', 1);
+        if (endQuote !== -1) {
+          val = val.slice(1, endQuote);
+        } else {
+          val = val.slice(1);
+        }
+      } else if (val.startsWith("'")) {
+        const endQuote = val.indexOf("'", 1);
+        if (endQuote !== -1) {
+          val = val.slice(1, endQuote);
+        } else {
+          val = val.slice(1);
+        }
+      } else {
+        const commentIdx = val.indexOf("#");
+        if (commentIdx !== -1) {
+          val = val.slice(0, commentIdx).trim();
+        }
+      }
+      out[key] = val;
     }
     return out;
   } catch {
