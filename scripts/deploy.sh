@@ -294,12 +294,56 @@ verify_contract() {  # <name>
     return 0
   fi
 
-  local admin_addr
-  admin_addr="$(stellar contract invoke --id "$id" --source "$IDENTITY" --network "$NETWORK" -- admin 2>/dev/null || true)"
+  local admin_addr=""
+  local err_output=""
+  local tmp_err
+  tmp_err="$(mktemp)"
+
+  case "$name" in
+    token|bot_nft)
+      admin_addr="$(stellar contract invoke --id "$id" --source "$IDENTITY" --network "$NETWORK" -- admin 2>"$tmp_err" || true)"
+      ;;
+    registry)
+      admin_addr="$(stellar contract invoke --id "$id" --source "$IDENTITY" --network "$NETWORK" -- get_admin 2>"$tmp_err" || true)"
+      ;;
+    accrual)
+      admin_addr="$(stellar contract invoke --id "$id" --source "$IDENTITY" --network "$NETWORK" -- get_accrual_admin 2>"$tmp_err" || true)"
+      ;;
+    marketplace)
+      # Marketplace has no admin() getter (#1252); verify config
+      local cfg
+      cfg="$(stellar contract invoke --id "$id" --source "$IDENTITY" --network "$NETWORK" -- config 2>"$tmp_err" || true)"
+      if [[ -n "$cfg" ]]; then
+        admin_addr="$(echo "$cfg" | jq -r '.admin // empty' 2>/dev/null || true)"
+        [[ -z "$admin_addr" ]] && admin_addr="$cfg"
+      fi
+      if [[ -z "$admin_addr" ]]; then
+        err_output="$(cat "$tmp_err" 2>/dev/null || true)"
+        rm -f "$tmp_err"
+        if [[ -n "$err_output" ]]; then
+          log "WARNING: could not verify $name config ($err_output)"
+        else
+          log "$name verified (no admin getter implemented)"
+        fi
+        return 0
+      fi
+      ;;
+    *)
+      admin_addr="$(stellar contract invoke --id "$id" --source "$IDENTITY" --network "$NETWORK" -- admin 2>"$tmp_err" || true)"
+      ;;
+  esac
+
+  err_output="$(cat "$tmp_err" 2>/dev/null || true)"
+  rm -f "$tmp_err"
+
   if [[ -n "$admin_addr" ]]; then
     log "$name verified (admin: $admin_addr)"
   else
-    log "WARNING: could not verify $name admin — is it initialized?"
+    if [[ -n "$err_output" ]]; then
+      log "WARNING: could not verify $name admin ($err_output) — is it initialized?"
+    else
+      log "WARNING: could not verify $name admin — is it initialized?"
+    fi
   fi
 }
 
