@@ -307,6 +307,7 @@ impl RegistryContract {
     /// Errors: `AlreadyRegistered`, `UsernameTaken` (taken, empty, or over
     /// 32 bytes), `Overflow` (user counter exhausted).
     pub fn register(env: Env, user: Address, username: String) -> Result<(), RegistryError> {
+        Self::require_initialized(&env)?;
         user.require_auth();
 
         // Check if user is already registered
@@ -586,6 +587,15 @@ impl RegistryContract {
         env.storage().instance().get(&DataKey::Writers)
     }
 
+    /// Mutations and writes are rejected until initialize has run (#366).
+    /// Without this, users could be registered on a contract with no admin.
+    fn require_initialized(env: &Env) -> Result<(), RegistryError> {
+        if !env.storage().instance().has(&DataKey::Initialized) {
+            return Err(RegistryError::NotInitialized);
+        }
+        Ok(())
+    }
+
     fn require_accrual(env: &Env) -> Result<(), RegistryError> {
         if let Some(writers) = env
             .storage()
@@ -619,6 +629,7 @@ impl RegistryContract {
     /// `MAX_POINTS_PER_CALL`, a sanity bound against ledger-corrupting
     /// credits), `Overflow` (total would exceed `u64`).
     pub fn add_points(env: Env, user: Address, points: u64) -> Result<(), RegistryError> {
+        Self::require_initialized(&env)?;
         // #318: only the configured accrual writer may mutate points.
         Self::require_accrual(&env)?;
         // SECURITY NOTE: This function modifies user state. It should only be called
@@ -699,6 +710,7 @@ impl RegistryContract {
     ///
     /// Errors: `NotRegistered`.
     pub fn increment_bot_count(env: Env, user: Address) -> Result<(), RegistryError> {
+        Self::require_initialized(&env)?;
         // #318: only the configured bot_nft writer may mutate bot counts.
         Self::require_bot_nft(&env)?;
         // SECURITY NOTE: This function modifies user state. It should only be called
@@ -728,6 +740,7 @@ impl RegistryContract {
     ///
     /// Errors: `NotRegistered`.
     pub fn decrement_bot_count(env: Env, user: Address) -> Result<(), RegistryError> {
+        Self::require_initialized(&env)?;
         user.require_auth();
         let mut profile: UserProfile = env
             .storage()
@@ -748,6 +761,7 @@ impl RegistryContract {
     /// [`RegistryError::NegativeAmount`] so `claimed_amt` is monotonically
     /// non-decreasing.
     pub fn add_claimed_amt(env: Env, user: Address, amount: i128) -> Result<(), RegistryError> {
+        Self::require_initialized(&env)?;
         // #318: only the configured accrual writer may mutate claimed amounts.
         Self::require_accrual(&env)?;
         if amount < 0 {
@@ -1714,6 +1728,69 @@ mod test {
         assert_eq!(retrieved_admin1, admin);
         assert_eq!(retrieved_admin2, admin);
         assert_eq!(retrieved_admin1, retrieved_admin2);
+    }
+
+    // #366: every mutating entry point on a fresh (uninitialized) contract
+    // must return NotInitialized, and initialize must still work afterwards.
+    fn fresh_contract() -> (Env, RegistryContractClient<'static>) {
+        let env = Env::default();
+        env.mock_all_auths();
+        let id = env.register_contract(None, RegistryContract);
+        let client = RegistryContractClient::new(&env, &id);
+        (env, client)
+    }
+
+    #[test]
+    fn test_register_on_uninitialized_returns_not_initialized() {
+        let (env, client) = fresh_contract();
+        let user = Address::generate(&env);
+        let result = client.try_register(&user, &String::from_str(&env, "early"));
+        assert_eq!(result, Err(Ok(RegistryError::NotInitialized)));
+        assert_eq!(client.total_users(), 0);
+        assert!(!client.is_registered(&user));
+    }
+
+    #[test]
+    fn test_add_points_on_uninitialized_returns_not_initialized() {
+        let (env, client) = fresh_contract();
+        let user = Address::generate(&env);
+        let result = client.try_add_points(&user, &5_u64);
+        assert_eq!(result, Err(Ok(RegistryError::NotInitialized)));
+    }
+
+    #[test]
+    fn test_add_claimed_amt_on_uninitialized_returns_not_initialized() {
+        let (env, client) = fresh_contract();
+        let user = Address::generate(&env);
+        let result = client.try_add_claimed_amt(&user, &5_i128);
+        assert_eq!(result, Err(Ok(RegistryError::NotInitialized)));
+    }
+
+    #[test]
+    fn test_increment_bot_count_on_uninitialized_returns_not_initialized() {
+        let (env, client) = fresh_contract();
+        let user = Address::generate(&env);
+        let result = client.try_increment_bot_count(&user);
+        assert_eq!(result, Err(Ok(RegistryError::NotInitialized)));
+    }
+
+    #[test]
+    fn test_decrement_bot_count_on_uninitialized_returns_not_initialized() {
+        let (env, client) = fresh_contract();
+        let user = Address::generate(&env);
+        let result = client.try_decrement_bot_count(&user);
+        assert_eq!(result, Err(Ok(RegistryError::NotInitialized)));
+    }
+
+    #[test]
+    fn test_initialize_works_on_fresh_contract_and_getters_default() {
+        let (env, client) = fresh_contract();
+        let admin = Address::generate(&env);
+        client.initialize(&admin);
+        assert_eq!(client.get_admin(), admin);
+        assert_eq!(client.total_users(), 0);
+        assert!(!client.is_registered(&Address::generate(&env)));
+        assert_eq!(client.get_leaderboard(&10_u32).len(), 0);
     }
 
     #[test]
