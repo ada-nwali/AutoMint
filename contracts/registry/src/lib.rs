@@ -33,8 +33,10 @@
 
 #![no_std]
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, symbol_short, Address, Env, String, Vec,
+    contract, contracterror, contractimpl, contracttype, symbol_short, Address, Bytes, Env, String,
+    Vec,
 };
+use soroban_sdk::xdr::ToXdr;
 
 // #38: Define DataKey storage keys addressing per-user and global storage
 #[derive(Clone)]
@@ -55,8 +57,7 @@ pub enum DataKey {
     SeasonPoints(u32, Address),
     // Global storage
     /// Bounded leaderboard (#332): `Vec<(Address, u64)>` of at most
-    /// `LEADERBOARD_SIZE` entries, sorted by points descending. Ties: the user
-    /// who reached that total first ranks higher.
+    /// `LEADERBOARD_SIZE` entries, sorted by the tiebreak in `ranks_above` (#368).
     TopUsers,
     /// Number of allocated `UserPage` buckets (#358), so `get_users` can bound
     /// its scan to live pages while the user listing stays out of the
@@ -211,6 +212,40 @@ const LEDGER_THRESHOLD: u32 = 103680;
 /// Maximum number of users tracked by the leaderboard (#332).
 pub const LEADERBOARD_SIZE: u32 = 100;
 
+/// Leaderboard ordering key (#368). Entries are ranked by:
+/// 1. higher `points` first;
+/// 2. then earlier `registered_at` (ledger timestamp of `register`);
+/// 3. then `addr` (XDR bytes of the address), ascending.
+#[derive(Clone)]
+pub struct RankKey {
+    pub points: u64,
+    pub registered_at: u64,
+    pub addr: Bytes,
+}
+
+/// True when `a` ranks strictly above `b` under the leaderboard tiebreak (#368).
+/// Irreflexive and transitive, so the list has one deterministic order.
+pub fn ranks_above(a: &RankKey, b: &RankKey) -> bool {
+    if a.points != b.points {
+        return a.points > b.points;
+    }
+    if a.registered_at != b.registered_at {
+        return a.registered_at < b.registered_at;
+    }
+    cmp_bytes(&a.addr, &b.addr) == core::cmp::Ordering::Less
+}
+
+/// Lexicographic byte comparison; a strict prefix sorts first (#368).
+pub(crate) fn cmp_bytes(a: &Bytes, b: &Bytes) -> core::cmp::Ordering {
+    let n = a.len().min(b.len());
+    for i in 0..n {
+        let (x, y) = (a.get(i).unwrap(), b.get(i).unwrap());
+        if x != y {
+            return x.cmp(&y);
+        }
+    }
+    a.len().cmp(&b.len())
+}
 /// Sentinel returned by [`RegistryContract::get_rank`] when a registered user
 /// falls below the top-`LEADERBOARD_SIZE` cutoff ("unranked").
 pub const UNRANKED: u32 = u32::MAX;
@@ -356,12 +391,11 @@ impl RegistryContract {
             .persistent()
             .set(&DataKey::Username(normalized), &user);
 
-        // While the leaderboard has room, a new (0-point) user joins at the
-        // end so small deployments still list every registered user in
-        // registration order. Once full, only users who earn points get in.
+        // A new (0-point) user is placed by the leaderboard tiebreak (#368). With
+        // no points yet, that means registration order (earlier timestamp first),
+        // once the board is full a 0-point user only gets in if they outrank the floor.
         let mut top = Self::load_top(&env);
-        if top.len() < LEADERBOARD_SIZE {
-            top.push_back((user.clone(), 0u64));
+        if Self::place_in_top(&env, &mut top, &user, 0u64) {
             env.storage().instance().set(&DataKey::TopUsers, &top);
         }
 
@@ -798,6 +832,54 @@ impl RegistryContract {
             .unwrap_or_else(|| Vec::new(env))
     }
 
+    /// Builds the leaderboard key for `addr` at `points`, reading `registered_at`
+    /// from its profile (#368). A missing profile sorts last on time.
+    fn rank_key(env: &Env, addr: &Address, points: u64) -> RankKey {
+        let registered_at = env
+            .storage()
+            .persistent()
+            .get::<_, UserProfile>(&DataKey::UserProfile(addr.clone()))
+            .map(|p| p.registered_at)
+            .unwrap_or(u64::MAX);
+        RankKey {
+            points,
+            registered_at,
+            addr: addr.clone().to_xdr(env),
+        }
+    }
+
+    /// Inserts `user` at `points` into the sorted, bounded list (#368).
+    /// Returns false, leaving `top` unchanged, when the list is full and the
+    /// user does not outrank the current last entry.
+    fn place_in_top(env: &Env, top: &mut Vec<(Address, u64)>, user: &Address, points: u64) -> bool {
+        let key = Self::rank_key(env, user, points);
+        if top.len() >= LEADERBOARD_SIZE {
+            let last = top.get(top.len() - 1).unwrap();
+            if !ranks_above(&key, &Self::rank_key(env, &last.0, last.1)) {
+                return false;
+            }
+        }
+        let mut pos = top.len();
+        for k in 0..top.len() {
+            let entry = top.get(k).unwrap();
+            if ranks_above(&key, &Self::rank_key(env, &entry.0, entry.1)) {
+                pos = k;
+                break;
+            }
+        }
+        top.insert(pos, (user.clone(), points));
+        if top.len() > LEADERBOARD_SIZE {
+            top.pop_back();
+        }
+        true
+    }
+
+    /// Incrementally maintain the bounded top-N list (#332). Cost is O(N) with
+    /// N = `LEADERBOARD_SIZE`, independent of total user count. Points only
+    /// ever increase, so a user already listed is removed and re-placed by the
+    /// tiebreak (#368); an unlisted user enters only if they outrank the floor.
+    fn update_top(env: &Env, user: &Address, new_total: u64) {
+        let mut top = Self::load_top(env);
     /// In-place bounded top-N maintenance (#332 lifetime board, #371 season
     /// boards). Cost is O(N) with N = `LEADERBOARD_SIZE`, independent of total
     /// user count. Points only ever increase, so a user already listed is
@@ -810,10 +892,12 @@ impl RegistryContract {
         while i < top.len() {
             if top.get(i).unwrap().0 == *user {
                 top.remove(i);
-                was_listed = true;
                 break;
             }
             i += 1;
+        }
+        if Self::place_in_top(env, &mut top, user, new_total) {
+            env.storage().instance().set(&DataKey::TopUsers, &top);
         }
 
         if !was_listed && top.len() >= LEADERBOARD_SIZE {
@@ -892,7 +976,8 @@ impl RegistryContract {
     /// Top users by points, highest first. Reads the maintained `TopUsers`
     /// list and hydrates at most `min(limit, LEADERBOARD_SIZE)` profiles, so the
     /// cost does not depend on the total number of users. Equal totals are
-    /// ordered by who reached the total first (earlier wins), deterministically.
+    /// ordered by the tiebreak in `ranks_above` (#368): earlier registration first,
+    /// then address bytes ascending.
     pub fn get_leaderboard(env: Env, limit: u32) -> Vec<UserProfile> {
         let mut result: Vec<UserProfile> = Vec::new(&env);
         if limit == 0 {
@@ -1606,6 +1691,7 @@ mod test {
         let mut users = std::vec::Vec::new();
         for i in 0..(LEADERBOARD_SIZE + 5) {
             let u = Address::generate(&env);
+            env.ledger().with_mut(|li| li.timestamp = i as u64 + 1);
             client.register(&u, &String::from_str(&env, &std::format!("u{}", i)));
             client.add_points(&u, &10_u64);
             users.push(u);
@@ -1629,19 +1715,90 @@ mod test {
             .all(|p| p.address != users[LEADERBOARD_SIZE as usize - 1]));
     }
 
-    // #332: equal totals rank by who reached the total first.
+    // #368: equal totals rank by registration time (earlier first).
     #[test]
-    fn test_leaderboard_tie_order_is_first_to_reach() {
+    fn test_leaderboard_tie_order_uses_registered_at() {
         let (env, _admin, client) = setup();
         let a = Address::generate(&env);
         let b = Address::generate(&env);
-        client.register(&a, &String::from_str(&env, "ta"));
+        let c = Address::generate(&env);
+        env.ledger().with_mut(|li| li.timestamp = 20);
         client.register(&b, &String::from_str(&env, "tb"));
+        env.ledger().with_mut(|li| li.timestamp = 10);
+        client.register(&a, &String::from_str(&env, "ta"));
+        env.ledger().with_mut(|li| li.timestamp = 30);
+        client.register(&c, &String::from_str(&env, "tc"));
+        // Add points in the opposite order to registration to rule out insertion order.
+        client.add_points(&c, &50_u64);
         client.add_points(&b, &50_u64);
         client.add_points(&a, &50_u64);
+        let lb = client.get_leaderboard(&3_u32);
+        assert_eq!(lb.get(0).unwrap().address, a);
+        assert_eq!(lb.get(1).unwrap().address, b);
+        assert_eq!(lb.get(2).unwrap().address, c);
+    }
+
+    // #368: higher points beat an earlier registration.
+    #[test]
+    fn test_leaderboard_points_beat_earlier_registration() {
+        let (env, _admin, client) = setup();
+        let early = Address::generate(&env);
+        let late = Address::generate(&env);
+        env.ledger().with_mut(|li| li.timestamp = 10);
+        client.register(&early, &String::from_str(&env, "early"));
+        env.ledger().with_mut(|li| li.timestamp = 20);
+        client.register(&late, &String::from_str(&env, "late"));
+        client.add_points(&late, &5_u64);
         let lb = client.get_leaderboard(&2_u32);
-        assert_eq!(lb.get(0).unwrap().address, b);
-        assert_eq!(lb.get(1).unwrap().address, a);
+        assert_eq!(lb.get(0).unwrap().address, late);
+        assert_eq!(lb.get(1).unwrap().address, early);
+    }
+
+    // #368: same points and same registration time fall back to address bytes ascending.
+    #[test]
+    fn test_leaderboard_same_points_and_time_uses_address_order() {
+        let (env, _admin, client) = setup();
+        env.ledger().with_mut(|li| li.timestamp = 5);
+        let mut keyed: std::vec::Vec<(Bytes, Address)> = std::vec::Vec::new();
+        for i in 0..3u32 {
+            let u = Address::generate(&env);
+            client.register(&u, &String::from_str(&env, &std::format!("same{}", i)));
+            client.add_points(&u, &7_u64);
+            keyed.push((u.clone().to_xdr(&env), u));
+        }
+        keyed.sort_by(|x, y| cmp_bytes(&x.0, &y.0));
+        let lb = client.get_leaderboard(&3_u32);
+        for (idx, (_, addr)) in keyed.iter().enumerate() {
+            assert_eq!(lb.get(idx as u32).unwrap().address, *addr);
+        }
+    }
+
+    // #368: the comparison function on its own: points, then time, then bytes.
+    #[test]
+    fn test_ranks_above_points_then_time_then_address() {
+        let env = Env::default();
+        let lo = Bytes::from_slice(&env, &[1u8]);
+        let hi = Bytes::from_slice(&env, &[9u8]);
+        let key = |points: u64, registered_at: u64, addr: &Bytes| RankKey {
+            points,
+            registered_at,
+            addr: addr.clone(),
+        };
+        // Points decide first, regardless of time or bytes.
+        assert!(ranks_above(&key(10, 50, &hi), &key(9, 1, &lo)));
+        assert!(!ranks_above(&key(9, 1, &lo), &key(10, 50, &hi)));
+        // Equal points: earlier registration wins, regardless of bytes.
+        assert!(ranks_above(&key(10, 1, &hi), &key(10, 2, &lo)));
+        assert!(!ranks_above(&key(10, 2, &lo), &key(10, 1, &hi)));
+        // Equal points and time: lower address bytes win.
+        assert!(ranks_above(&key(10, 1, &lo), &key(10, 1, &hi)));
+        assert!(!ranks_above(&key(10, 1, &hi), &key(10, 1, &lo)));
+        // Irreflexive: nothing ranks above itself.
+        assert!(!ranks_above(&key(10, 1, &lo), &key(10, 1, &lo)));
+        // A strict byte prefix sorts before the longer value.
+        let prefix = Bytes::from_slice(&env, &[1u8]);
+        let longer = Bytes::from_slice(&env, &[1u8, 0u8]);
+        assert!(ranks_above(&key(1, 1, &prefix), &key(1, 1, &longer)));
     }
 
     #[test]
