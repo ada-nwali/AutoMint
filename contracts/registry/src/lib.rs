@@ -319,7 +319,7 @@ impl RegistryContract {
         }
 
         // Validate username length (empty or too long)
-        if username.is_empty() || username.len() > 32 {
+        if !Self::username_is_valid(&username) {
             return Err(RegistryError::UsernameTaken);
         }
 
@@ -409,6 +409,28 @@ impl RegistryContract {
         );
 
         Ok(())
+    }
+
+    /// Username rule shared by `register`, `change_username` and
+    /// `username_available`: 1 to 32 characters. Matching is exact and
+    /// case-sensitive, which is what `register` has always done (#360).
+    fn username_is_valid(username: &String) -> bool {
+        !username.is_empty() && username.len() <= 32
+    }
+
+    /// Returns the address that owns `name`, or `NotRegistered` if the name is free (#360).
+    pub fn resolve_username(env: Env, name: String) -> Result<Address, RegistryError> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::Username(name))
+            .ok_or(RegistryError::NotRegistered)
+    }
+
+    /// True when `register` would accept `name` for a new user: the name is
+    /// valid and not already taken. Does not check whether the caller is
+    /// already registered (#360).
+    pub fn username_available(env: Env, name: String) -> bool {
+        Self::username_is_valid(&name) && !env.storage().persistent().has(&DataKey::Username(name))
     }
 
     /// #373: ASCII-only lowercase for username normalization.
@@ -2067,6 +2089,77 @@ mod test {
         assert_eq!(client.total_users(), 100);
         assert_eq!(client.verify_user_count(), 100);
         assert_eq!(client.total_users(), 100);
+    }
+
+    // ── is_registered edge cases (#91) ──────────────────────────────────────
+
+    // #91: Unregistered address returns false
+    // #360: resolve_username returns the owner, and username_available agrees
+    // with what register accepts.
+    #[test]
+    fn test_resolve_username_returns_owner() {
+        let (env, _admin, client) = setup();
+        let user = Address::generate(&env);
+        client.register(&user, &String::from_str(&env, "botmaster"));
+        assert_eq!(
+            client.resolve_username(&String::from_str(&env, "botmaster")),
+            user
+        );
+    }
+
+    #[test]
+    fn test_resolve_unregistered_username_returns_not_registered() {
+        let (env, _admin, client) = setup();
+        let result = client.try_resolve_username(&String::from_str(&env, "nobody"));
+        assert_eq!(result, Err(Ok(RegistryError::NotRegistered)));
+    }
+
+    #[test]
+    fn test_username_available_reflects_taken_and_free_names() {
+        let (env, _admin, client) = setup();
+        let user = Address::generate(&env);
+        let name = String::from_str(&env, "taken");
+        assert!(client.username_available(&name));
+        client.register(&user, &name);
+        assert!(!client.username_available(&name));
+        assert!(client.username_available(&String::from_str(&env, "other")));
+    }
+
+    #[test]
+    fn test_username_available_rejects_invalid_lengths() {
+        let (env, _admin, client) = setup();
+        assert!(!client.username_available(&String::from_str(&env, "")));
+        let too_long = String::from_str(&env, "thisistoolongusernamethatexceedsthelimit");
+        assert!(!client.username_available(&too_long));
+    }
+
+    #[test]
+    fn test_username_available_agrees_with_register() {
+        let (env, _admin, client) = setup();
+        let candidates = [
+            "a",
+            "12345678901234567890123456789012",
+            "",
+            "thisistoolongusernamethatexceedsthelimit",
+        ];
+        for raw in candidates {
+            let name = String::from_str(&env, raw);
+            let predicted = client.username_available(&name);
+            let user = Address::generate(&env);
+            let accepted = client.try_register(&user, &name).is_ok();
+            assert_eq!(predicted, accepted, "mismatch for {:?}", raw);
+        }
+    }
+
+    #[test]
+    fn test_username_available_is_false_after_register_of_same_name() {
+        let (env, _admin, client) = setup();
+        let first = Address::generate(&env);
+        let second = Address::generate(&env);
+        let name = String::from_str(&env, "dup");
+        client.register(&first, &name);
+        assert!(!client.username_available(&name));
+        assert!(client.try_register(&second, &name).is_err());
     }
 
     #[test]
