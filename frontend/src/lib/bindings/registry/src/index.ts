@@ -221,9 +221,9 @@ export interface Client {
   }) => Promise<AssembledTransaction<Result<void>>>
 
   /**
-   * Construct and simulate a get_admin transaction. Returns an `AssembledTransaction` object which will have a `result` field containing the result of the simulation. If this transaction changes contract state, you will need to call `signAndSend()` on the returned object.
+   * Construct and simulate a admin transaction. Returns an `AssembledTransaction` object which will have a `result` field containing the result of the simulation. If this transaction changes contract state, you will need to call `signAndSend()` on the returned object.
    */
-  get_admin: (options?: {
+  admin: (options?: {
     /**
      * The fee to pay for the transaction. Default: BASE_FEE
      */
@@ -832,7 +832,7 @@ export class Client extends ContractClient {
     get_rank: this.txFromJSON<Result<u32>>,
         get_user: this.txFromJSON<Result<UserProfile>>,
         register: this.txFromJSON<Result<void>>,
-        get_admin: this.txFromJSON<Result<string>>,
+        admin: this.txFromJSON<Result<string>>,
         get_users: this.txFromJSON<Array<string>>,
         set_admin: this.txFromJSON<Result<void>>,
         add_points: this.txFromJSON<Result<void>>,

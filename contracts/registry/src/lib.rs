@@ -1176,7 +1176,7 @@ impl RegistryContract {
     /// The admin address recorded at initialization. Read-only.
     ///
     /// Errors: `NotInitialized` before the contract is set up.
-    pub fn get_admin(env: Env) -> Result<Address, RegistryError> {
+    pub fn admin(env: Env) -> Result<Address, RegistryError> {
         env.storage()
             .instance()
             .get(&DataKey::Admin)
@@ -1688,7 +1688,7 @@ mod test {
     #[test]
     fn test_admin_returns_current_admin() {
         let (_env, admin, client) = setup();
-        assert_eq!(client.get_admin(), admin);
+        assert_eq!(client.admin(), admin);
     }
 
     // Test double-initialization fails with the AlreadyInitialized variant
@@ -1706,15 +1706,15 @@ mod test {
     #[test]
     fn test_initialize_sets_admin() {
         let (_env, admin, client) = setup();
-        assert_eq!(client.get_admin(), admin);
+        assert_eq!(client.admin(), admin);
     }
 
     // #37: Test admin persists across calls
     #[test]
     fn test_admin_persists() {
         let (_env, admin, client) = setup();
-        let retrieved_admin1 = client.get_admin();
-        let retrieved_admin2 = client.get_admin();
+        let retrieved_admin1 = client.admin();
+        let retrieved_admin2 = client.admin();
         assert_eq!(retrieved_admin1, admin);
         assert_eq!(retrieved_admin2, admin);
         assert_eq!(retrieved_admin1, retrieved_admin2);
@@ -1725,7 +1725,7 @@ mod test {
         let env = Env::default();
         let id = env.register_contract(None, RegistryContract);
         let client = RegistryContractClient::new(&env, &id);
-        let result = client.try_get_admin();
+        let result = client.try_admin();
         assert_eq!(result, Err(Ok(RegistryError::NotInitialized)));
     }
 
@@ -2312,7 +2312,7 @@ mod test {
         client.register(&user, &String::from_str(&env, "Repair"));
         client.set_points(&user, &42_u64);
         assert_eq!(client.get_user(&user).total_points, 42);
-        assert_eq!(client.get_admin(), admin);
+        assert_eq!(client.admin(), admin);
     }
 
     // #93: Repeated accumulation across many calls sums correctly
@@ -3120,7 +3120,7 @@ mod auth_tests {
             },
         }]);
         assert!(client.try_accept_admin().is_err());
-        assert_eq!(client.get_admin(), admin);
+        assert_eq!(client.admin(), admin);
 
         // Unrelated address cannot accept
         env.mock_auths(&[MockAuth {
@@ -3133,7 +3133,7 @@ mod auth_tests {
             },
         }]);
         assert!(client.try_accept_admin().is_err());
-        assert_eq!(client.get_admin(), admin);
+        assert_eq!(client.admin(), admin);
 
         // Pending admin accepts and becomes the active admin
         env.mock_auths(&[MockAuth {
@@ -3146,7 +3146,7 @@ mod auth_tests {
             },
         }]);
         assert!(client.try_accept_admin().is_ok());
-        assert_eq!(client.get_admin(), new_admin);
+        assert_eq!(client.admin(), new_admin);
         assert_eq!(client.pending_admin(), None);
     }
 

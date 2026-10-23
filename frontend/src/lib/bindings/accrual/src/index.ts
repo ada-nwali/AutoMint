@@ -322,9 +322,9 @@ export interface Client {
   }) => Promise<AssembledTransaction<Result<u128>>>
 
   /**
-   * Construct and simulate a get_accrual_admin transaction. Returns an `AssembledTransaction` object which will have a `result` field containing the result of the simulation. If this transaction changes contract state, you will need to call `signAndSend()` on the returned object.
+   * Construct and simulate an admin transaction. Returns an `AssembledTransaction` object which will have a `result` field containing the result of the simulation. If this transaction changes contract state, you will need to call `signAndSend()` on the returned object.
    */
-  get_accrual_admin: (options?: {
+  admin: (options?: {
     /**
      * The fee to pay for the transaction. Default: BASE_FEE
      */
@@ -488,7 +488,7 @@ export class Client extends ContractClient {
         stop_accrual: this.txFromJSON<Result<void>>,
         start_accrual: this.txFromJSON<Result<void>>,
         pending_points: this.txFromJSON<Result<u128>>,
-        get_accrual_admin: this.txFromJSON<Result<string>>,
+        admin: this.txFromJSON<Result<string>>,
         get_accrual_state: this.txFromJSON<Option<AccrualState>>,
         accept_token_admin: this.txFromJSON<Result<void>>,
         get_accrual_states: this.txFromJSON<Result<Array<Option<AccrualState>>>>,
