@@ -363,15 +363,43 @@ write_env_local() {
   update_env_var() {  # <key> <value>
     local key=$1 value=$2
     if grep -q "^${key}=" "$envf"; then
-      sed -i "s|^${key}=.*|${key}=${value}|g" "$envf"
+      if sed --version >/dev/null 2>&1; then
+        sed -i "s|^${key}=.*|${key}=${value}|g" "$envf"
+      else
+        local tmpfile
+        tmpfile="$(mktemp)"
+        sed "s|^${key}=.*|${key}=${value}|g" "$envf" > "$tmpfile"
+        mv "$tmpfile" "$envf"
+      fi
     else
       echo "${key}=${value}" >> "$envf"
     fi
   }
 
-  update_env_var NEXT_PUBLIC_NETWORK              "TESTNET"
-  update_env_var NEXT_PUBLIC_SOROBAN_RPC_URL      "https://soroban-testnet.stellar.org"
-  update_env_var NEXT_PUBLIC_STELLAR_NETWORK_PASSPHRASE "\"Test SDF Network ; September 2015\""
+  local net="TESTNET"
+  local rpc="https://soroban-testnet.stellar.org"
+  local passphrase=""Test SDF Network ; September 2015""
+  case "$NETWORK" in
+    mainnet)
+      net="PUBLIC"
+      rpc="https://soroban-mainnet.stellar.org"
+      passphrase=""Public Global Stellar Network ; September 2015""
+      ;;
+    futurenet)
+      net="FUTURENET"
+      rpc="https://rpc-futurenet.stellar.org"
+      passphrase=""Test SDF Future Network ; October 2022""
+      ;;
+    testnet|*)
+      net="TESTNET"
+      rpc="https://soroban-testnet.stellar.org"
+      passphrase=""Test SDF Network ; September 2015""
+      ;;
+  esac
+
+  update_env_var NEXT_PUBLIC_NETWORK              "$net"
+  update_env_var NEXT_PUBLIC_SOROBAN_RPC_URL      "$rpc"
+  update_env_var NEXT_PUBLIC_STELLAR_NETWORK_PASSPHRASE "$passphrase"
   update_env_var NEXT_PUBLIC_REGISTRY_CONTRACT_ID      "$(manifest_get registry contract_id)"
   update_env_var NEXT_PUBLIC_BOT_NFT_CONTRACT_ID       "$(manifest_get bot_nft contract_id)"
   update_env_var NEXT_PUBLIC_ACCRUAL_CONTRACT_ID        "$(manifest_get accrual contract_id)"
