@@ -201,6 +201,9 @@ pub enum RegistryError {
     NoPendingAdmin = 10,
     /// A single `add_points` update exceeded `MAX_POINTS_PER_CALL` (#363).
     ImplausiblePoints = 11,
+    /// The username is empty or longer than 32 bytes. Distinct from
+    /// `UsernameTaken`, which means a valid name is already in use.
+    InvalidUsername = 12,
 }
 
 const PAGE_SIZE: u32 = 200;
@@ -304,8 +307,9 @@ impl RegistryContract {
     ///
     /// Auth: `user.require_auth()`.
     ///
-    /// Errors: `AlreadyRegistered`, `UsernameTaken` (taken, empty, or over
-    /// 32 bytes), `Overflow` (user counter exhausted).
+    /// Errors: `AlreadyRegistered`, `InvalidUsername` (empty or over 32
+    /// bytes), `UsernameTaken` (already used by another address), `Overflow`
+    /// (user counter exhausted).
     pub fn register(env: Env, user: Address, username: String) -> Result<(), RegistryError> {
         user.require_auth();
 
@@ -320,7 +324,7 @@ impl RegistryContract {
 
         // Validate username length (empty or too long)
         if username.is_empty() || username.len() > 32 {
-            return Err(RegistryError::UsernameTaken);
+            return Err(RegistryError::InvalidUsername);
         }
 
         // #373: uniqueness is checked against the ASCII-lowercased form so
@@ -1397,7 +1401,7 @@ mod test {
         let (env, _admin, client) = setup();
         let user = Address::generate(&env);
         let result = client.try_register(&user, &String::from_str(&env, ""));
-        assert_eq!(result, Err(Ok(RegistryError::UsernameTaken)));
+        assert_eq!(result, Err(Ok(RegistryError::InvalidUsername)));
     }
 
     // #40: Test invalid username (too long)
@@ -1407,7 +1411,7 @@ mod test {
         let user = Address::generate(&env);
         let long_name = String::from_str(&env, "thisistoolongusernamethatexceedsthelimit");
         let result = client.try_register(&user, &long_name);
-        assert_eq!(result, Err(Ok(RegistryError::UsernameTaken)));
+        assert_eq!(result, Err(Ok(RegistryError::InvalidUsername)));
     }
 
     // #40: Test add_points accumulation

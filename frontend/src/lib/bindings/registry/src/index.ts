@@ -134,7 +134,13 @@ export const Errors = {
   /**
    * A single `add_points` update exceeded `MAX_POINTS_PER_CALL` (#363).
    */
-  11: {message:"ImplausiblePoints"}
+  11: {message:"ImplausiblePoints"},
+
+  /**
+   * The username is empty or longer than 32 bytes. Distinct from
+   * `UsernameTaken`, which means a valid name is already in use.
+   */
+  12: {message:"InvalidUsername"}
 }
 
 export interface UserTombstone {

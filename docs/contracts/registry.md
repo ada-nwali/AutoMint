@@ -64,7 +64,8 @@ Register a new user profile. Requires authorization from `user`.
 
 Errors:
 - `AlreadyRegistered`: `user` already has a profile.
-- `UsernameTaken`: `username` is empty, longer than 32 characters, or already used (in any casing) by another address.
+- `InvalidUsername`: `username` is empty or longer than 32 characters.
+- `UsernameTaken`: `username` is already used (in any casing) by another address.
 
 Example:
 
