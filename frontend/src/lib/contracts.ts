@@ -1340,7 +1340,7 @@ export function __resetPreflightForTests(): void {
  * cached module-wide so repeated navigations share one report.
  *
  * Cheap reads used: registry `total_users`, bot_nft `admin`, accrual
- * `get_accrual_admin`, marketplace `next_listing_id`, token `decimals`.
+ * `admin`, marketplace `next_listing_id`, token `decimals`.
  */
 export function preflight(sourceAddress?: string): Promise<PreflightReport> {
   if (_preflightCache) return _preflightCache;
@@ -1371,7 +1371,7 @@ export function preflight(sourceAddress?: string): Promise<PreflightReport> {
     }> = [
       { name: "registry", contractId: CONTRACT_ADDRESSES.registry, method: "total_users", args: [] },
       { name: "botNft", contractId: CONTRACT_ADDRESSES.botNft, method: "admin", args: [] },
-      { name: "accrual", contractId: CONTRACT_ADDRESSES.accrual, method: "get_accrual_admin", args: [] },
+      { name: "accrual", contractId: CONTRACT_ADDRESSES.accrual, method: "admin", args: [] },
       { name: "marketplace", contractId: CONTRACT_ADDRESSES.marketplace, method: "next_listing_id", args: [] },
       { name: "token", contractId: CONTRACT_ADDRESSES.token, method: "decimals", args: [] },
     ];

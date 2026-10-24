@@ -39,7 +39,7 @@ export const CONTRACT_ERROR_MESSAGES: Readonly<
   registry: {
     1: message("Already initialized", "The registry has already been configured.", "Refresh the page."),
     2: message("Already registered", "This wallet already has a registry profile.", "Open your profile."),
-    3: message("Username unavailable", "That username is invalid or already in use.", "Choose another username."),
+    3: message("Username unavailable", "That username is already in use.", "Choose another username."),
     4: message("Profile not found", "No registered profile exists for this wallet.", "Register your wallet."),
     5: message("Not authorized", "This wallet cannot perform that registry operation.", "Connect the authorized wallet."),
     6: message("Registry unavailable", "The registry has not been initialized.", "Contact support."),
@@ -47,6 +47,8 @@ export const CONTRACT_ERROR_MESSAGES: Readonly<
     8: message("Batch too large", "This request contains more addresses than one call supports.", "Split the request into smaller batches."),
     9: message("Invalid amount", "Claimed amounts cannot be negative.", "Retry with a non-negative amount."),
     10: message("No admin change pending", "There is no pending registry administrator change.", "Ask the current admin to propose a change."),
+    11: message("Points update rejected", "This points update exceeds the amount one call may add.", "Contact support."),
+    12: message("Invalid username", "Usernames must be 1 to 32 characters long.", "Enter a username within that length."),
   },
   botNft: {
     1: message("Already initialized", "The bot collection has already been configured.", "Refresh the page."),

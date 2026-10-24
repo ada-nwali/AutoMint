@@ -814,7 +814,7 @@ impl AccrualContract {
     /// The accrual admin address recorded at initialization.
     ///
     /// Errors: `NotInitialized` before the contract is set up.
-    pub fn get_accrual_admin(env: Env) -> Result<Address, AccrualError> {
+    pub fn admin(env: Env) -> Result<Address, AccrualError> {
         env.storage()
             .instance()
             .get(&DataKey::Admin)

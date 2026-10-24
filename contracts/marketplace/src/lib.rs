@@ -1327,8 +1327,21 @@ impl MarketplaceContract {
     /// The stored configuration: admin, bot NFT contract, platform fee
     /// (`fee_bps`) and creator royalty (`royalty_bps`), both in basis
     /// points. Read-only.
-    pub fn config(env: Env) -> Config {
-        env.storage().instance().get(&DataKey::Config).unwrap()
+    /// The marketplace configuration set at `initialize`.
+    ///
+    /// Errors: `NotInitialized` before the contract is set up.
+    pub fn config(env: Env) -> Result<Config, MarketplaceError> {
+        env.storage()
+            .instance()
+            .get(&DataKey::Config)
+            .ok_or(MarketplaceError::NotInitialized)
+    }
+
+    /// The admin address recorded at initialization. Read-only.
+    ///
+    /// Errors: `NotInitialized` before the contract is set up.
+    pub fn admin(env: Env) -> Result<Address, MarketplaceError> {
+        Ok(Self::config(env)?.admin)
     }
 
     /// Change the platform fee. The combined `fee_bps + royalty_bps` must stay
@@ -1565,11 +1578,11 @@ impl MarketplaceContract {
 
     /// The bot NFT contract this marketplace escrows and settles trades
     /// through. Set at `initialize` (or by admin `set_bot_nft`) and
-    /// probed to respond to the bot_nft interface. Read-only; panics if
-    /// the contract was never initialized.
-    pub fn bot_nft(env: Env) -> Address {
-        let config: Config = env.storage().instance().get(&DataKey::Config).unwrap();
-        config.bot_nft
+    /// probed to respond to the bot_nft interface. Read-only.
+    ///
+    /// Errors: `NotInitialized` before the contract is set up.
+    pub fn bot_nft(env: Env) -> Result<Address, MarketplaceError> {
+        Ok(Self::config(env)?.bot_nft)
     }
 
     // ---------------------------------------------------------------------

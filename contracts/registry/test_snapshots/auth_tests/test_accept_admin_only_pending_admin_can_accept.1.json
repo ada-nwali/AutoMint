@@ -686,7 +686,7 @@
                 "bytes": "0000000000000000000000000000000000000000000000000000000000000001"
               },
               {
-                "symbol": "get_admin"
+                "symbol": "admin"
               }
             ],
             "data": "void"
@@ -707,7 +707,7 @@
                 "symbol": "fn_return"
               },
               {
-                "symbol": "get_admin"
+                "symbol": "admin"
               }
             ],
             "data": {
@@ -874,7 +874,7 @@
                 "bytes": "0000000000000000000000000000000000000000000000000000000000000001"
               },
               {
-                "symbol": "get_admin"
+                "symbol": "admin"
               }
             ],
             "data": "void"
@@ -895,7 +895,7 @@
                 "symbol": "fn_return"
               },
               {
-                "symbol": "get_admin"
+                "symbol": "admin"
               }
             ],
             "data": {
@@ -1084,7 +1084,7 @@
                 "bytes": "0000000000000000000000000000000000000000000000000000000000000001"
               },
               {
-                "symbol": "get_admin"
+                "symbol": "admin"
               }
             ],
             "data": "void"
@@ -1105,7 +1105,7 @@
                 "symbol": "fn_return"
               },
               {
-                "symbol": "get_admin"
+                "symbol": "admin"
               }
             ],
             "data": {

@@ -300,7 +300,7 @@ export interface Client {
      * Whether to automatically simulate the transaction when constructing the AssembledTransaction. Default: true
      */
     simulate?: boolean;
-  }) => Promise<AssembledTransaction<Config>>
+  }) => Promise<AssembledTransaction<Result<Config>>>
 
   /**
    * Construct and simulate a bot_nft transaction. Returns an `AssembledTransaction` object which will have a `result` field containing the result of the simulation. If this transaction changes contract state, you will need to call `signAndSend()` on the returned object.
@@ -320,7 +320,27 @@ export interface Client {
      * Whether to automatically simulate the transaction when constructing the AssembledTransaction. Default: true
      */
     simulate?: boolean;
-  }) => Promise<AssembledTransaction<string>>
+  }) => Promise<AssembledTransaction<Result<string>>>
+
+  /**
+   * Construct and simulate an admin transaction. Returns an `AssembledTransaction` object which will have a `result` field containing the result of the simulation. If this transaction changes contract state, you will need to call `signAndSend()` on the returned object.
+   */
+  admin: (options?: {
+    /**
+     * The fee to pay for the transaction. Default: BASE_FEE
+     */
+    fee?: number;
+
+    /**
+     * The maximum amount of time to wait for the transaction to complete. Default: DEFAULT_TIMEOUT
+     */
+    timeoutInSeconds?: number;
+
+    /**
+     * Whether to automatically simulate the transaction when constructing the AssembledTransaction. Default: true
+     */
+    simulate?: boolean;
+  }) => Promise<AssembledTransaction<Result<string>>>
 
   /**
    * Construct and simulate a buy_bot transaction. Returns an `AssembledTransaction` object which will have a `result` field containing the result of the simulation. If this transaction changes contract state, you will need to call `signAndSend()` on the returned object.
@@ -1278,8 +1298,9 @@ export class Client extends ContractClient {
   }
   public readonly fromJSON = {
     pause: this.txFromJSON<Result<void>>,
-        config: this.txFromJSON<Config>,
-        bot_nft: this.txFromJSON<string>,
+        config: this.txFromJSON<Result<Config>>,
+        bot_nft: this.txFromJSON<Result<string>>,
+        admin: this.txFromJSON<Result<string>>,
         buy_bot: this.txFromJSON<Result<void>>,
         unpause: this.txFromJSON<Result<void>>,
         list_bot: this.txFromJSON<Result<u64>>,

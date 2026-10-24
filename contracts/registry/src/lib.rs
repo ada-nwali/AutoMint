@@ -201,6 +201,9 @@ pub enum RegistryError {
     NoPendingAdmin = 10,
     /// A single `add_points` update exceeded `MAX_POINTS_PER_CALL` (#363).
     ImplausiblePoints = 11,
+    /// The username is empty or longer than 32 bytes. Distinct from
+    /// `UsernameTaken`, which means a valid name is already in use.
+    InvalidUsername = 12,
 }
 
 const PAGE_SIZE: u32 = 200;
@@ -304,8 +307,9 @@ impl RegistryContract {
     ///
     /// Auth: `user.require_auth()`.
     ///
-    /// Errors: `AlreadyRegistered`, `UsernameTaken` (taken, empty, or over
-    /// 32 bytes), `Overflow` (user counter exhausted).
+    /// Errors: `AlreadyRegistered`, `InvalidUsername` (empty or over 32
+    /// bytes), `UsernameTaken` (already used by another address), `Overflow`
+    /// (user counter exhausted).
     pub fn register(env: Env, user: Address, username: String) -> Result<(), RegistryError> {
         user.require_auth();
 
@@ -320,7 +324,7 @@ impl RegistryContract {
 
         // Validate username length (empty or too long)
         if username.is_empty() || username.len() > 32 {
-            return Err(RegistryError::UsernameTaken);
+            return Err(RegistryError::InvalidUsername);
         }
 
         // #373: uniqueness is checked against the ASCII-lowercased form so
@@ -1172,7 +1176,7 @@ impl RegistryContract {
     /// The admin address recorded at initialization. Read-only.
     ///
     /// Errors: `NotInitialized` before the contract is set up.
-    pub fn get_admin(env: Env) -> Result<Address, RegistryError> {
+    pub fn admin(env: Env) -> Result<Address, RegistryError> {
         env.storage()
             .instance()
             .get(&DataKey::Admin)
@@ -1397,7 +1401,7 @@ mod test {
         let (env, _admin, client) = setup();
         let user = Address::generate(&env);
         let result = client.try_register(&user, &String::from_str(&env, ""));
-        assert_eq!(result, Err(Ok(RegistryError::UsernameTaken)));
+        assert_eq!(result, Err(Ok(RegistryError::InvalidUsername)));
     }
 
     // #40: Test invalid username (too long)
@@ -1407,7 +1411,7 @@ mod test {
         let user = Address::generate(&env);
         let long_name = String::from_str(&env, "thisistoolongusernamethatexceedsthelimit");
         let result = client.try_register(&user, &long_name);
-        assert_eq!(result, Err(Ok(RegistryError::UsernameTaken)));
+        assert_eq!(result, Err(Ok(RegistryError::InvalidUsername)));
     }
 
     // #40: Test add_points accumulation
@@ -1684,7 +1688,7 @@ mod test {
     #[test]
     fn test_admin_returns_current_admin() {
         let (_env, admin, client) = setup();
-        assert_eq!(client.get_admin(), admin);
+        assert_eq!(client.admin(), admin);
     }
 
     // Test double-initialization fails with the AlreadyInitialized variant
@@ -1702,15 +1706,15 @@ mod test {
     #[test]
     fn test_initialize_sets_admin() {
         let (_env, admin, client) = setup();
-        assert_eq!(client.get_admin(), admin);
+        assert_eq!(client.admin(), admin);
     }
 
     // #37: Test admin persists across calls
     #[test]
     fn test_admin_persists() {
         let (_env, admin, client) = setup();
-        let retrieved_admin1 = client.get_admin();
-        let retrieved_admin2 = client.get_admin();
+        let retrieved_admin1 = client.admin();
+        let retrieved_admin2 = client.admin();
         assert_eq!(retrieved_admin1, admin);
         assert_eq!(retrieved_admin2, admin);
         assert_eq!(retrieved_admin1, retrieved_admin2);
@@ -1721,7 +1725,7 @@ mod test {
         let env = Env::default();
         let id = env.register_contract(None, RegistryContract);
         let client = RegistryContractClient::new(&env, &id);
-        let result = client.try_get_admin();
+        let result = client.try_admin();
         assert_eq!(result, Err(Ok(RegistryError::NotInitialized)));
     }
 
@@ -2308,7 +2312,7 @@ mod test {
         client.register(&user, &String::from_str(&env, "Repair"));
         client.set_points(&user, &42_u64);
         assert_eq!(client.get_user(&user).total_points, 42);
-        assert_eq!(client.get_admin(), admin);
+        assert_eq!(client.admin(), admin);
     }
 
     // #93: Repeated accumulation across many calls sums correctly
@@ -3116,7 +3120,7 @@ mod auth_tests {
             },
         }]);
         assert!(client.try_accept_admin().is_err());
-        assert_eq!(client.get_admin(), admin);
+        assert_eq!(client.admin(), admin);
 
         // Unrelated address cannot accept
         env.mock_auths(&[MockAuth {
@@ -3129,7 +3133,7 @@ mod auth_tests {
             },
         }]);
         assert!(client.try_accept_admin().is_err());
-        assert_eq!(client.get_admin(), admin);
+        assert_eq!(client.admin(), admin);
 
         // Pending admin accepts and becomes the active admin
         env.mock_auths(&[MockAuth {
@@ -3142,7 +3146,7 @@ mod auth_tests {
             },
         }]);
         assert!(client.try_accept_admin().is_ok());
-        assert_eq!(client.get_admin(), new_admin);
+        assert_eq!(client.admin(), new_admin);
         assert_eq!(client.pending_admin(), None);
     }
 
