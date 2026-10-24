@@ -1,4 +1,4 @@
-import { Contract, TransactionBuilder, scValToNative, xdr, SorobanRpc } from "@stellar/stellar-sdk";
+import { Contract, TransactionBuilder, scValToNative, xdr, rpc } from "@stellar/stellar-sdk";
 import {
   BASE_FEE,
   POLL_INTERVAL_MS,
@@ -176,43 +176,10 @@ async function submitTxWithHash(
 ): Promise<{ hash: string; result: unknown }> {
   const server = getServer();
 
-  // Rebuild to validate the XDR
-  let txToSend: unknown = signedXdr;
+  const txToSend = TransactionBuilder.fromXDR(signedXdr, STELLAR_NETWORK_PASSPHRASE);
+  let sendRes: rpc.Api.SendTransactionResponse;
   try {
-    const maybeFromXdr = (
-      TransactionBuilder as unknown as {
-        fromXDR?: (xdr: string, passphrase: string) => unknown;
-      }
-    ).fromXDR;
-    if (typeof maybeFromXdr === "function") {
-      txToSend = maybeFromXdr.call(TransactionBuilder, signedXdr, STELLAR_NETWORK_PASSPHRASE);
-    } else {
-      const sdk = await import("@stellar/stellar-sdk");
-      const TxClass = (sdk as unknown as { Transaction?: unknown }).Transaction as
-        | (new (xdr: string, passphrase: string) => unknown)
-        | undefined;
-      if (TxClass) {
-        try {
-          txToSend = new (TxClass as new (x: string, p: string) => unknown)(
-            signedXdr,
-            STELLAR_NETWORK_PASSPHRASE,
-          );
-        } catch {
-          txToSend = signedXdr;
-        }
-      }
-    }
-  } catch {
-    txToSend = signedXdr;
-  }
-
-  let sendRes: SorobanRpc.Api.SendTransactionResponse;
-  try {
-    sendRes = await (
-      server as unknown as {
-        sendTransaction: (tx: unknown) => Promise<SorobanRpc.Api.SendTransactionResponse>;
-      }
-    ).sendTransaction(txToSend as never);
+    sendRes = await server.sendTransaction(txToSend);
   } catch (err) {
     throw err instanceof Error ? err : new Error(String(err));
   }
@@ -248,7 +215,7 @@ async function submitTxWithHash(
  * settling its persisted history entry on SUCCESS / FAILED.
  */
 async function pollSubmitted(
-  server: SorobanRpc.Server,
+  server: rpc.Server,
   hash: string,
 ): Promise<{ hash: string; result: unknown }> {
   const timeoutMs = TX_POLL_TIMEOUT_MS;
@@ -257,7 +224,7 @@ async function pollSubmitted(
   const maxDelayMs = 8000;
 
   while (Date.now() - start < timeoutMs) {
-    let getRes: SorobanRpc.Api.GetTransactionResponse | undefined;
+    let getRes: rpc.Api.GetTransactionResponse | undefined;
     try {
       getRes = await server.getTransaction(hash);
     } catch {
@@ -385,7 +352,7 @@ async function executeTransactionInternal(
 
   const simResult = await rpcCall((server) => server.simulateTransaction(tx));
 
-  if (SorobanRpc.Api.isSimulationError(simResult)) {
+  if (rpc.Api.isSimulationError(simResult)) {
     const errorMsg = `Simulation failed for ${method}: ${simResult.error}`;
     onStatus?.({
       stage: "error",
@@ -398,7 +365,7 @@ async function executeTransactionInternal(
 
   // Apply fee multiplier to assembled resource fee for surge buffer
   const assembled = applyFeeMultiplier(
-    SorobanRpc.assembleTransaction(tx, simResult).build(),
+    rpc.assembleTransaction(tx, simResult).build(),
     FEE_MULTIPLIER,
   );
 
@@ -464,7 +431,7 @@ async function executeTransactionInternal(
 
       const retrySimResult = await rpcCall((server) => server.simulateTransaction(retryTx));
 
-      if (SorobanRpc.Api.isSimulationError(retrySimResult)) {
+      if (rpc.Api.isSimulationError(retrySimResult)) {
         const retryError = `Simulation failed on retry for ${method}: ${retrySimResult.error}`;
         onStatus?.({ stage: "error", error: retryError });
         throw new Error(retryError);
@@ -473,7 +440,7 @@ async function executeTransactionInternal(
       onStatus?.({ stage: "assembling" });
 
       const retryAssembled = applyFeeMultiplier(
-        SorobanRpc.assembleTransaction(retryTx, retrySimResult).build(),
+        rpc.assembleTransaction(retryTx, retrySimResult).build(),
         FEE_MULTIPLIER,
       );
 
@@ -505,7 +472,7 @@ async function executeTransactionInternal(
  * FAILED, `null` while the transaction is still unresolved (NOT_FOUND).
  */
 function toResumeOutcome(
-  result: SorobanRpc.Api.GetTransactionResponse,
+  result: rpc.Api.GetTransactionResponse,
 ): { status: "success" } | { status: "failed"; error: string } | null {
   const status = (result as unknown as { status: string }).status;
   if (status === "SUCCESS") return { status: "success" };

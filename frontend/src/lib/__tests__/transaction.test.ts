@@ -92,7 +92,7 @@ jest.mock("@stellar/stellar-sdk", () => ({
   scValToNative: jest.fn((v) => v),
   nativeToScVal: jest.fn((v) => v),
   xdr: {},
-  SorobanRpc: {
+  rpc: {
     Api: { isSimulationError: jest.fn(() => false) },
     assembleTransaction: jest.fn(() => ({
       build: () => ({

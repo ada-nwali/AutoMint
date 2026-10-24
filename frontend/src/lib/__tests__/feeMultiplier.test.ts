@@ -26,7 +26,7 @@ function buildSorobanTx() {
     .build();
 
   return new TransactionBuilder(new Account(Keypair.random().publicKey(), "100"), {
-    fee: "58281",
+    fee: "100",
     networkPassphrase: Networks.TESTNET,
     sorobanData,
   })

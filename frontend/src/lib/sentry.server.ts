@@ -6,13 +6,7 @@
  */
 
 import * as Sentry from "@sentry/nextjs";
-
-const STELLAR_ADDRESS_RE = /\b[GCM][A-Z0-9]{55}\b/g;
-const EMAIL_RE = /\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b/g;
-
-function scrubString(value: string): string {
-  return value.replace(STELLAR_ADDRESS_RE, "[address]").replace(EMAIL_RE, "[email]");
-}
+import { scrubEvent } from "./sentryScrub";
 
 Sentry.init({
   // Only pass a dsn when one is configured — `dsn: undefined` is rejected
@@ -25,12 +19,7 @@ Sentry.init({
 
   sendDefaultPii: false,
 
-  beforeSend(event) {
-    if (event.request?.url) {
-      event.request.url = scrubString(event.request.url);
-    }
-    return event;
-  },
+  beforeSend: scrubEvent,
 
   environment: process.env.NEXT_PUBLIC_APP_ENV ?? "development",
 });

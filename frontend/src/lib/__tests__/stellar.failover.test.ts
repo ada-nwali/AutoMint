@@ -16,7 +16,7 @@ const constructedUrls: string[] = [];
 
 jest.mock("@stellar/stellar-sdk", () => ({
   __esModule: true,
-  SorobanRpc: {
+  rpc: {
     Server: jest.fn().mockImplementation((url: string) => {
       constructedUrls.push(url);
       return {

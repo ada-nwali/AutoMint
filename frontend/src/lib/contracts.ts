@@ -1,6 +1,6 @@
 import {
   Contract,
-  SorobanRpc,
+  rpc,
   nativeToScVal,
   xdr,
 } from "@stellar/stellar-sdk";
@@ -163,7 +163,7 @@ function defaultSource(sourceAddress?: string): string {
  *      surface a readable message and the call fails at *build* time rather
  *      than on-chain with `txSOROBAN_INVALID`.
  *   4. Otherwise assembles the foot-print and resource fee into the
- *      transaction via `SorobanRpc.assembleTransaction(tx, sim).build()`
+ *      transaction via `rpc.assembleTransaction(tx, sim).build()`
  *      and returns the resulting XDR — which now carries a non-empty
  *      `sorobanData` footprint and a fee reflecting the simulated cost.
  */
@@ -191,11 +191,11 @@ async function buildTxXdr(
 
   const sim = await rpcCall((server) => server.simulateTransaction(tx));
 
-  if (SorobanRpc.Api.isSimulationError(sim)) {
+  if (rpc.Api.isSimulationError(sim)) {
     throw new Error(`Simulation failed for ${method}: ${sim.error}`);
   }
 
-  const assembled = SorobanRpc.assembleTransaction(tx, sim).build();
+  const assembled = rpc.assembleTransaction(tx, sim).build();
   return assembled.toXDR();
 }
 

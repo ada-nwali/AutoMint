@@ -18,7 +18,7 @@ const mockBuiltTx = { tx: true, toXDR: jest.fn(() => "UNPREPARED_XDR") };
 
 jest.mock("@stellar/stellar-sdk", () => ({
   __esModule: true,
-  SorobanRpc: {
+  rpc: {
     Server: jest.fn().mockImplementation(() => ({
       getAccount: mockGetAccount,
       simulateTransaction: mockSimulateTransaction,

@@ -15,33 +15,7 @@
  */
 
 import * as Sentry from "@sentry/nextjs";
-
-// Stellar address pattern: starts with G, C, or M and is 56 chars total.
-const STELLAR_ADDRESS_RE = /\b[GCM][A-Z0-9]{55}\b/g;
-const EMAIL_RE = /\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b/g;
-
-function scrubString(value: string): string {
-  return value.replace(STELLAR_ADDRESS_RE, "[address]").replace(EMAIL_RE, "[email]");
-}
-
-function scrubBreadcrumbs(breadcrumbs: Sentry.Breadcrumb[]): Sentry.Breadcrumb[] {
-  return breadcrumbs.map((b) => ({
-    ...b,
-    // Optional props are only re-specified when present — `exactOptionalPropertyTypes`
-    // forbids assigning `undefined` to them.
-    ...(b.message ? { message: scrubString(b.message) } : {}),
-    ...(b.data
-      ? {
-          data: Object.fromEntries(
-            Object.entries(b.data).map(([k, v]) => [
-              k,
-              typeof v === "string" ? scrubString(v) : v,
-            ]),
-          ),
-        }
-      : {}),
-  }));
-}
+import { scrubEvent } from "./src/lib/sentryScrub";
 
 Sentry.init({
   // Only pass a dsn when one is configured — `dsn: undefined` is rejected
@@ -64,26 +38,7 @@ Sentry.init({
    * Returning `null` drops the event entirely; returning the mutated event
    * allows it through.
    */
-  beforeSend(event) {
-    // `breadcrumbs` is a plain array on the Event type (not a Map), so it is
-    // replaced wholesale after scrubbing.
-    if (event.breadcrumbs) {
-      event.breadcrumbs = scrubBreadcrumbs(event.breadcrumbs);
-    }
-
-    if (event.request?.url) {
-      event.request.url = scrubString(event.request.url);
-    }
-
-    if (event.request?.headers) {
-      // Drop the Referer header — it may contain address fragments from
-      // query-string navigation.
-      delete event.request.headers["Referer"];
-      delete event.request.headers["referer"];
-    }
-
-    return event;
-  },
+  beforeSend: scrubEvent,
 
   /**
    * Tag every event with the deployment environment so issues can be

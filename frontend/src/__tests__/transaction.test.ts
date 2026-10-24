@@ -64,12 +64,16 @@ jest.mock("@/lib/stellar", () => ({
 // real; it is replaced so the test can assert exactly what reaches it and what
 // gets signed afterwards. Everything else in the SDK is real.
 const mockAssemble = jest.fn();
+const mockFromXDR = jest.fn();
 jest.mock("@stellar/stellar-sdk", () => {
   const actual = jest.requireActual("@stellar/stellar-sdk");
   return {
     ...actual,
-    SorobanRpc: {
-      ...actual.SorobanRpc,
+    TransactionBuilder: Object.assign(actual.TransactionBuilder, {
+      fromXDR: (...args: unknown[]) => mockFromXDR(...args),
+    }),
+    rpc: {
+      ...actual.rpc,
       assembleTransaction: (...args: unknown[]) => mockAssemble(...args),
     },
   };
@@ -98,6 +102,7 @@ const LEDGER_INFO = {
 
 const TX_HASH = "ab".repeat(32);
 const ASSEMBLED_XDR = "ASSEMBLED_TX_XDR";
+const PARSED_TX = { parsed: true };
 const SIGNED_XDR = "SIGNED_TX_XDR";
 
 /** simulateTransaction, contract call would succeed. */
@@ -197,6 +202,7 @@ beforeEach(() => {
     build: () => ({ fee: "58281", toXDR: () => ASSEMBLED_XDR }),
   }));
   mockSignTransaction.mockResolvedValue(signApproved);
+  mockFromXDR.mockReturnValue(PARSED_TX);
   mockGetNetwork.mockResolvedValue({
     network: "TESTNET",
     networkPassphrase: STELLAR_NETWORK_PASSPHRASE,
@@ -372,7 +378,11 @@ describe("transaction pipeline", () => {
         address: seller,
       }),
     );
-    expect(mockServer.sendTransaction).toHaveBeenCalledWith(SIGNED_XDR);
+    expect(mockFromXDR).toHaveBeenCalledWith(
+      SIGNED_XDR,
+      STELLAR_NETWORK_PASSPHRASE,
+    );
+    expect(mockServer.sendTransaction).toHaveBeenCalledWith(PARSED_TX);
     expect(mockServer.getTransaction).toHaveBeenCalledWith(TX_HASH);
 
     expect(loadingToast.mock.calls.map(([message]) => message)).toEqual([
@@ -404,8 +414,8 @@ describe("transaction pipeline", () => {
 
     expect(error?.message).toContain("HostError: Error(Contract, #4)");
     expect(errorToast).toHaveBeenCalledWith(
-      expect.stringContaining("HostError: Error(Contract, #4)"),
-      expect.anything(),
+      "Bot transfer failed",
+      expect.objectContaining({ description: expect.stringContaining("Check bot ownership") }),
     );
     expect(mockAssemble).not.toHaveBeenCalled();
     expect(mockSignTransaction).not.toHaveBeenCalled();
@@ -421,8 +431,8 @@ describe("transaction pipeline", () => {
 
     expect(error?.message).toBe("User declined access");
     expect(errorToast).toHaveBeenCalledWith(
-      "Listing failed: User declined access",
-      expect.anything(),
+      "Transaction failed",
+      expect.objectContaining({ description: expect.stringContaining("Review the details") }),
     );
     expect(mockServer.sendTransaction).not.toHaveBeenCalled();
     expect(successToast).not.toHaveBeenCalled();
@@ -449,8 +459,8 @@ describe("transaction pipeline", () => {
 
     expect(error?.message).toContain("Transaction failed on-chain");
     expect(errorToast).toHaveBeenCalledWith(
-      expect.stringContaining("Transaction failed on-chain"),
-      expect.anything(),
+      "Transaction failed",
+      expect.objectContaining({ description: expect.stringContaining("Review the details") }),
     );
     expect(successToast).not.toHaveBeenCalled();
     expect(storedTransactions()).toEqual([
@@ -466,8 +476,8 @@ describe("transaction pipeline", () => {
 
     expect(error?.message).toContain("not confirmed within");
     expect(errorToast).toHaveBeenCalledWith(
-      expect.stringContaining("not confirmed within"),
-      expect.anything(),
+      "Transaction failed",
+      expect.objectContaining({ description: expect.stringContaining("Review the details") }),
     );
     expect(successToast).not.toHaveBeenCalled();
     // It may still land on-chain, so it is left for resumePendingTransactions.

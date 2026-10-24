@@ -1,6 +1,6 @@
 import {
   Contract,
-  SorobanRpc,
+  rpc,
   TransactionBuilder,
   scValToNative,
   xdr,
@@ -34,11 +34,11 @@ import { useWalletStore } from "@/store/walletStore";
 const FEE_MULTIPLIER = Number(process.env.NEXT_PUBLIC_FEE_MULTIPLIER) || 1.0;
 
 /**
- * Memoized {@link SorobanRpc.Server} instances keyed by endpoint URL, so
+ * Memoized {@link rpc.Server} instances keyed by endpoint URL, so
  * each configured RPC URL keeps one client (and one HTTP connection pool)
  * for the lifetime of the page (#454).
  */
-const _servers = new Map<string, SorobanRpc.Server>();
+const _servers = new Map<string, rpc.Server>();
 
 /** Index into {@link SOROBAN_RPC_URLS} of the endpoint currently in use. */
 let _activeIndex = 0;
@@ -70,10 +70,10 @@ export function __resetRpcFailoverStateForTests(): void {
   _servers.clear();
 }
 
-function serverFor(url: string): SorobanRpc.Server {
+function serverFor(url: string): rpc.Server {
   let server = _servers.get(url);
   if (!server) {
-    server = new SorobanRpc.Server(url, {
+    server = new rpc.Server(url, {
       allowHttp: url.startsWith("http://"),
     });
     _servers.set(url, server);
@@ -82,13 +82,13 @@ function serverFor(url: string): SorobanRpc.Server {
 }
 
 /**
- * Returns a memoized {@link SorobanRpc.Server} pointed at the *active*
+ * Returns a memoized {@link rpc.Server} pointed at the *active*
  * endpoint. The instance is created on first use per URL and reused on
  * every subsequent call. Because failover can rotate the active URL, call
  * this (or use {@link rpcCall}) per operation rather than caching the
  * server across a retry loop (#454).
  */
-export function getServer(): SorobanRpc.Server {
+export function getServer(): rpc.Server {
   return serverFor(getActiveRpcUrl());
 }
 
@@ -124,7 +124,7 @@ function noteRpcSuccess(): void {
  * Never wrap `sendTransaction` in this helper — submissions are not
  * idempotent and must be attempted exactly once (#454).
  */
-export async function rpcCall<T>(fn: (server: SorobanRpc.Server) => Promise<T>): Promise<T> {
+export async function rpcCall<T>(fn: (server: rpc.Server) => Promise<T>): Promise<T> {
   return withRetry(
     async () => {
       try {
@@ -231,7 +231,7 @@ export async function connectFreighter(): Promise<{
 export const ACCOUNT_CACHE_TTL_MS = 10_000;
 
 /** The account type `server.getAccount` resolves to. */
-type CachedAccount = Awaited<ReturnType<SorobanRpc.Server["getAccount"]>>;
+type CachedAccount = Awaited<ReturnType<rpc.Server["getAccount"]>>;
 
 interface TtlEntry<T> {
   promise: Promise<T>;
@@ -373,7 +373,7 @@ export async function simulateContractCall<T = unknown>(
 
     const result = await rpcCall((server) => server.simulateTransaction(tx));
 
-    if (SorobanRpc.Api.isSimulationError(result)) {
+    if (rpc.Api.isSimulationError(result)) {
       throw new Error(`Simulation failed for ${method}: ${result.error}`);
     }
 
@@ -450,14 +450,18 @@ export async function buildPreparedTx(
  * time bounds and operations (#1286). `cloneFrom` does not carry Soroban data
  * over, so the simulated footprint and resource fee are passed through
  * explicitly, as the SDK's own `assembleTransaction` does. The builder's
- * `fee` is per operation, and a Soroban transaction has exactly one.
+ * `fee` is per operation, and a Soroban transaction has exactly one. SDK 14
+ * adds the resource fee during build, so exclude it from the inclusion fee.
  */
 export function applyFeeMultiplier(tx: Transaction, multiplier: number): Transaction {
   if (multiplier === 1) return tx;
 
+  const sorobanData = tx.toEnvelope().v1().tx().ext().sorobanData();
   return TransactionBuilder.cloneFrom(tx, {
-    fee: Math.ceil(parseInt(tx.fee, 10) * multiplier).toString(),
-    sorobanData: tx.toEnvelope().v1().tx().ext().sorobanData(),
+    fee: (
+      Math.ceil(parseInt(tx.fee, 10) * multiplier) - Number(sorobanData.resourceFee().toString())
+    ).toString(),
+    sorobanData,
   }).build();
 }
 
@@ -706,12 +710,12 @@ export async function submitTx(signedXdr: string): Promise<unknown> {
     txToSend = signedXdr;
   }
 
-  let sendRes: SorobanRpc.Api.SendTransactionResponse;
+  let sendRes: rpc.Api.SendTransactionResponse;
   try {
     // Server accepts Transaction | string depending on SDK version; cast is safe.
     sendRes = await (
       server as unknown as {
-        sendTransaction: (tx: unknown) => Promise<SorobanRpc.Api.SendTransactionResponse>;
+        sendTransaction: (tx: unknown) => Promise<rpc.Api.SendTransactionResponse>;
       }
     ).sendTransaction(txToSend as never);
   } catch (err) {
@@ -739,7 +743,7 @@ export async function submitTx(signedXdr: string): Promise<unknown> {
   const maxDelayMs = 8000;
 
   while (Date.now() - start < timeoutMs) {
-    let getRes: SorobanRpc.Api.GetTransactionResponse | undefined;
+  let getRes: rpc.Api.GetTransactionResponse | undefined;
     try {
       getRes = await server.getTransaction(hash);
     } catch {
