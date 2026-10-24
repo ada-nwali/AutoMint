@@ -225,16 +225,16 @@ async function submitTxWithHash(
     );
   }
 
+  if ((sendRes as unknown as { status: string }).status === "TRY_AGAIN_LATER") {
+    throw new TxSendFailedError("Transaction submission failed: TRY_AGAIN_LATER");
+  }
+
   const hash = (sendRes as unknown as { hash?: string }).hash;
   if (!hash) {
     throw new TxSendFailedError("No transaction hash returned from sendTransaction");
   }
 
-  // TRY_AGAIN_LATER means the node did not take the transaction, so there is
-  // nothing to track or resume; every other non-ERROR status was accepted.
-  if ((sendRes as unknown as { status: string }).status !== "TRY_AGAIN_LATER") {
-    onAccepted?.(hash);
-  }
+  onAccepted?.(hash);
   polling.add(hash);
   try {
     return await pollSubmitted(server, hash);

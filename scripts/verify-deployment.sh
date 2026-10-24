@@ -80,7 +80,16 @@ is_wanted() {  # <name> -> success when no --contract filter was given or it nam
   return 1
 }
 
-sha_of() { sha256sum "$1" | awk '{print $1}'; }
+sha_of() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | awk '{print $1}'
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$1" | awk '{print $1}'
+  else
+    echo "ERROR: neither sha256sum nor shasum -a 256 found" >&2
+    exit 1
+  fi
+}
 
 wasm_target_for() {  # <wasm-path> -> prints the Rust target directory, if known
   local path="$1"
