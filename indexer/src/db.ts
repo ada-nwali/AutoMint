@@ -319,23 +319,22 @@ export class IndexerDb {
       .get(MARKETPLACE_SCHEMA_KEY) as { value: string } | undefined;
     if (current?.value === MARKETPLACE_SCHEMA_VERSION) return;
 
-    const events = this.db
-      .prepare(
-        `SELECT event, topics_json, data_json, ledger
-         FROM events WHERE contract = 'marketplace' ORDER BY rowid`,
-      )
-      .all() as {
-      event: string;
-      topics_json: string;
-      data_json: string;
-      ledger: number;
-    }[];
-
     this.db.transaction(() => {
       this.db.prepare("DELETE FROM listings").run();
       this.db
         .prepare("DELETE FROM aggregates WHERE key GLOB 'marketplace_volume*'")
         .run();
+      const events = this.db
+        .prepare(
+          `SELECT event, topics_json, data_json, ledger
+           FROM events WHERE contract = 'marketplace' ORDER BY rowid`,
+        )
+        .iterate() as Iterable<{
+        event: string;
+        topics_json: string;
+        data_json: string;
+        ledger: number;
+      }>;
       for (const event of events) {
         this.applyMarketplaceEvent({
           event: event.event,
@@ -368,22 +367,21 @@ export class IndexerDb {
       return;
     }
 
-    const existingEvents = this.db
-      .prepare(
-        `SELECT event, topics_json, data_json, ledger
-         FROM events WHERE contract = 'marketplace' ORDER BY rowid`,
-      )
-      .all() as {
-      event: string;
-      topics_json: string;
-      data_json: string;
-      ledger: number;
-    }[];
-
     this.db.transaction(() => {
       this.db.exec("ALTER TABLE listings RENAME TO listings_legacy");
       this.db.exec(LISTINGS_SCHEMA);
       this.db.exec("DROP TABLE listings_legacy");
+      const existingEvents = this.db
+        .prepare(
+          `SELECT event, topics_json, data_json, ledger
+           FROM events WHERE contract = 'marketplace' ORDER BY rowid`,
+        )
+        .iterate() as Iterable<{
+        event: string;
+        topics_json: string;
+        data_json: string;
+        ledger: number;
+      }>;
       for (const event of existingEvents) {
         this.applyListingState({
           event: event.event,
