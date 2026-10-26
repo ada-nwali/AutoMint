@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect } from "react";
 import { create } from "zustand";
 import clsx from "clsx";
 import { Loader2, CheckCircle2, XCircle, ExternalLink, X } from "lucide-react";
@@ -83,6 +84,15 @@ export function TxStatusRow({ entry }: { entry: TxEntry }) {
   const meta = STAGE_META[status.stage];
   const dismiss = useTxStatusStore((s) => s.dismiss);
   const classified = status.stage === "error" && status.error ? classifyError(status.error) : null;
+
+  useEffect(() => {
+    if (status.stage === "success") {
+      const timer = setTimeout(() => {
+        dismiss(id);
+      }, 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [status.stage, id, dismiss]);
 
   return (
     <div
