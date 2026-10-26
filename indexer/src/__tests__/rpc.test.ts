@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { rpc } from "@stellar/stellar-sdk";
-import { isTransientError, SorobanRpcClient } from "../rpc.js";
+import { isTransientError, SorobanRpcClient, parseEventIndex } from "../rpc.js";
 
 /** An axios-style HTTP error: the status lives on `response.status`. */
 function httpError(status: number): Error {
@@ -71,5 +71,48 @@ describe("SorobanRpcClient.getEvents pagination retry (#1231)", () => {
     }
     expect(result.events.map((e) => e.eventIndex)).toEqual([1, 2]);
     expect(result.latestLedger).toBe(20);
+  });
+});
+describe("parseEventIndex (#1457)", () => {
+  it("extracts trailing event index from valid paging ids", () => {
+    expect(parseEventIndex("0000000042949672960-0000000001")).toBe(1);
+    expect(parseEventIndex("100-200-42")).toBe(42);
+    expect(parseEventIndex("single0")).toBe(0);
+  });
+
+  it("returns 0 for malformed or non-numeric trailing parts", () => {
+    expect(parseEventIndex("abc-def")).toBe(0);
+    expect(parseEventIndex("")).toBe(0);
+  });
+});
+
+describe("SorobanRpcClient.getOldestLedger (#1457)", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("queries getHealth and returns oldestLedger", async () => {
+    vi.spyOn(rpc.Server.prototype, "getHealth").mockResolvedValueOnce({
+      status: "healthy",
+      latestLedger: 1000,
+      oldestLedger: 450,
+      ledgerRetentionWindow: 550,
+    } as unknown as rpc.Api.GetHealthResponse);
+
+    const client = new SorobanRpcClient("https://rpc.invalid");
+    const oldest = await client.getOldestLedger();
+    expect(oldest).toBe(450);
+  });
+
+  it("aborts when signal is already aborted", async () => {
+    const controller = new AbortController();
+    controller.abort();
+
+    const client = new SorobanRpcClient("https://rpc.invalid");
+    await expect(
+      client.getEvents({
+        startLedger: 1,
+        contractIds: ["C1"],
+        signal: controller.signal,
+      }),
+    ).rejects.toThrow("RPC request aborted by shutdown");
   });
 });
