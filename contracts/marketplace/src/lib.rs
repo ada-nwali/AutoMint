@@ -1690,7 +1690,7 @@ impl MarketplaceContract {
             .extend_ttl(LEDGER_THRESHOLD, LEDGER_BUMP);
         env.events().publish(
             (symbol_short!("offered"), buyer, offer_id),
-            (bot_id, amount, expires_at),
+            (bot_id, amount, expires_at, currency),
         );
         Ok(offer_id)
     }

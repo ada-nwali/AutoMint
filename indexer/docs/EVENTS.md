@@ -77,10 +77,11 @@ new admin — same event name, different contracts.
 | `price_upd` | `[seller: Address, listing_id: u64]` | `(old_price: i128, new_price: i128)` | `update_price()` |
 | `sold` | `[seller: Address, buyer: Address]` | `(listing_id: u64, bot_id: u64, price: i128, currency: Address)` | `buy_bot()` |
 | `cancel` | `[seller: Address, listing_id: u64]` | `bot_id: u64` | `cancel_listing()` |
+| `offered` | `[buyer: Address, offer_id: u64]` | `(bot_id: u64, amount: i128, expires_at: u64, currency: Address)` | `make_offer()` |
 | `reclaimed` | `[seller: Address, listing_id: u64]` | `bot_id: u64` | `reclaim_expired()` |
 | `deactive` | `[bot_id: u64]` | `listing_id: u64` | `on_bot_moved()` (bot transferred out of escrow) |
 
-`listed` and `sold` carry the listing's `currency` so volume and floor price
+`listed`, `sold`, and `offered` carry the `currency` so volume, offer amounts, and floor price
 are kept per currency. Prices in different tokens are never summed.
 
 ## Token (AMT) contract

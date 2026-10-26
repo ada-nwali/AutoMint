@@ -2762,6 +2762,31 @@ mod offers_and_fees {
     // ---- make_offer ----
 
     #[test]
+    fn offered_event_carries_the_currency() {
+        let h = setup();
+        let (_seller, buyer, bot_id, offer_id) = offer_setup(&h);
+        let events = h.env.events().all();
+        let (contract, topics, data) = events.last().unwrap();
+        assert_eq!(contract, h.mkt.address);
+        let (symbol, event_buyer, event_offer_id): (Symbol, Address, u64) =
+            <(Symbol, Address, u64)>::try_from_val(&h.env, &topics).unwrap();
+        assert_eq!(symbol, symbol_short!("offered"));
+        assert_eq!(event_buyer, buyer);
+        assert_eq!(event_offer_id, offer_id);
+
+        let (offered_bot, offered_amount, offered_expires_at, offered_currency): (
+            u64,
+            i128,
+            u64,
+            Address,
+        ) = <(u64, i128, u64, Address)>::try_from_val(&h.env, &data).unwrap();
+        assert_eq!(offered_bot, bot_id);
+        assert_eq!(offered_amount, PRICE);
+        assert_eq!(offered_expires_at, now(&h) + DAY);
+        assert_eq!(offered_currency, h.token.address);
+    }
+
+    #[test]
     fn make_offer_escrows_the_funds_and_indexes_the_offer() {
         let h = setup();
         let (_seller, buyer, bot_id, offer_id) = offer_setup(&h);
