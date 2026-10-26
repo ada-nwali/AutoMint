@@ -15,14 +15,16 @@ The `testnet-implementation` branch contains a fully implemented, working testne
 
 ### Contract Status Table
 
+> **Note**: Contracts on this branch are implemented for **Stellar Testnet** and undergoing active testing and security hardening; they are not yet certified for mainnet production.
+
 | Contract | Path | Language | Implementation Status | Test Coverage | Key Features |
 |---|---|---|---|---|---|
-| **Registry** | `contracts/registry/` | Rust | Production-ready | Comprehensive | Profile registration, unique usernames, points ledger, leaderboard sorting |
-| **BotNFT** | `contracts/bot_nft/` | Rust | Production-ready | Comprehensive | Sequential minting, 5 bot tiers, ownership transfer, TTL renewal |
-| **Accrual** | `contracts/accrual/` | Rust | Production-ready | Comprehensive | Time-based point math, $AMT mint redemption, threshold logic |
-| **Marketplace**| `contracts/marketplace/` | Rust | Production-ready | Comprehensive | P2P bot escrow, positive price validation, 2.5% admin fee, cancellation |
-| **AMT Token** | `contracts/token/` | Rust | Production-ready | Comprehensive | SEP-41 compliant token, minting, burning, allowances, set_admin transfer |
-| **Testutils** | `contracts/testutils/` | Rust | Production-ready | Internal | Shared ledger time advance helpers (`advance_ledger`, `advance_past_ttl`) |
+| **Registry** | `contracts/registry/` | Rust | Testnet | Comprehensive | Profile registration, unique usernames, points ledger, leaderboard sorting |
+| **BotNFT** | `contracts/bot_nft/` | Rust | Testnet | Comprehensive | Sequential minting, 5 bot tiers, ownership transfer, TTL renewal |
+| **Accrual** | `contracts/accrual/` | Rust | Testnet | Comprehensive | Time-based point math, $AMT mint redemption, threshold logic |
+| **Marketplace**| `contracts/marketplace/` | Rust | Testnet | Comprehensive | P2P bot escrow, positive price validation, configurable admin fee (`set_fee_bps`, default 2.5%) and creator royalties, cancellation |
+| **AMT Token** | `contracts/token/` | Rust | Testnet | Comprehensive | SEP-41 compliant token, minting, burning, allowances, set_admin transfer |
+| **Testutils** | `contracts/testutils/` | Rust | Testnet | Internal | Shared ledger time advance helpers (`advance_ledger`, `advance_past_ttl`) |
 
 ### Frontend Status Table
 
