@@ -327,6 +327,17 @@ impl RegistryContract {
             return Err(RegistryError::InvalidUsername);
         }
 
+        // Validate username charset: restrict to [a-zA-Z0-9_], rejecting spaces,
+        // control bytes, zero-width characters, and non-ASCII lookalikes (#1454)
+        let n = username.len() as usize;
+        let mut buf = [0u8; 32];
+        username.copy_into_slice(&mut buf[..n]);
+        for &b in &buf[..n] {
+            if !(b.is_ascii_alphanumeric() || b == b'_') {
+                return Err(RegistryError::InvalidUsername);
+            }
+        }
+
         // #373: uniqueness is checked against the ASCII-lowercased form so
         // `Alice` and `alice` are the same identity; the original casing the
         // user typed is preserved in `display_name`.
@@ -1412,6 +1423,55 @@ mod test {
         let long_name = String::from_str(&env, "thisistoolongusernamethatexceedsthelimit");
         let result = client.try_register(&user, &long_name);
         assert_eq!(result, Err(Ok(RegistryError::InvalidUsername)));
+    }
+
+    // #1454: Test usernames with spaces, control bytes, invisible zero-width chars and non-ASCII lookalikes fail
+    #[test]
+    fn test_username_invalid_characters_fail() {
+        let (env, _admin, client) = setup();
+        let user = Address::generate(&env);
+
+        // Leading/trailing or internal spaces
+        assert_eq!(
+            client.try_register(&user, &String::from_str(&env, "alice ")),
+            Err(Ok(RegistryError::InvalidUsername))
+        );
+        assert_eq!(
+            client.try_register(&user, &String::from_str(&env, " alice")),
+            Err(Ok(RegistryError::InvalidUsername))
+        );
+        assert_eq!(
+            client.try_register(&user, &String::from_str(&env, "ali ce")),
+            Err(Ok(RegistryError::InvalidUsername))
+        );
+
+        // Zero-width space (​) and invisible chars
+        assert_eq!(
+            client.try_register(&user, &String::from_str(&env, "alice\u{200b}")),
+            Err(Ok(RegistryError::InvalidUsername))
+        );
+
+        // Unicode lookalikes (Cyrillic small letter a: а)
+        assert_eq!(
+            client.try_register(&user, &String::from_str(&env, "\u{0430}lice")),
+            Err(Ok(RegistryError::InvalidUsername))
+        );
+
+        // Symbols and special characters
+        assert_eq!(
+            client.try_register(&user, &String::from_str(&env, "alice!")),
+            Err(Ok(RegistryError::InvalidUsername))
+        );
+        assert_eq!(
+            client.try_register(&user, &String::from_str(&env, "alice@stellar")),
+            Err(Ok(RegistryError::InvalidUsername))
+        );
+
+        // Valid username with underscore and numbers succeeds
+        assert_eq!(
+            client.try_register(&user, &String::from_str(&env, "alice_123")),
+            Ok(Ok(()))
+        );
     }
 
     // #40: Test add_points accumulation
