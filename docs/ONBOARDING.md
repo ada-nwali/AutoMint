@@ -20,10 +20,10 @@ To quickly gain full context on data flow from on-chain contracts to React UI co
 
 ```mermaid
 flowchart LR
-    Step1["1. types\n(types/index.ts)"] --> Step2["2. lib/stellar\n(lib/stellar.ts & rpcRetry.ts)"]
-    Step2 --> Step3["3. lib/contracts\n(lib/contracts.ts)"]
-    Step3 --> Step4["4. hooks\n(hooks/use*.ts)"]
-    Step4 --> Step5["5. components\n(components/*)"]
+    Step1["1. types\n(frontend/src/types/index.ts)"] --> Step2["2. lib/stellar\n(frontend/src/lib/stellar.ts & rpcRetry.ts)"]
+    Step2 --> Step3["3. lib/contracts\n(frontend/src/lib/contracts.ts)"]
+    Step3 --> Step4["4. hooks\n(frontend/src/hooks/use*.ts)"]
+    Step4 --> Step5["5. components\n(frontend/src/components/*)"]
     Step5 --> Step6["6. pages\n(app/*/page.tsx)"]
 ```
 
@@ -31,7 +31,7 @@ flowchart LR
 
 ### Step 1: Data Models & Types (`frontend/src/types/index.ts`)
 
-Start by reading [`frontend/src/types/index.ts`](file:///Users/macosbigsur/Documents/Code/AutoMint/frontend/src/types/index.ts). This file defines the foundational TypeScript interfaces representing core domain models across the system:
+Start by reading [`frontend/src/types/index.ts`](../frontend/src/types/index.ts). This file defines the foundational TypeScript interfaces representing core domain models across the system:
 
 - `UserProfile`: On-chain user profile structure (`address`, `username`, `total_points`, `claimed_amt`, `registered_at`, `bot_count`).
 - `BotNFT` & `BotTier`: Idle mining bot metadata, tier levels (`Basic`, `Bronze`, `Silver`, `Gold`, `Diamond`), rates, and prices.
@@ -45,17 +45,17 @@ Start by reading [`frontend/src/types/index.ts`](file:///Users/macosbigsur/Docum
 
 Next, examine how the frontend communicates with the Stellar Testnet:
 
-1. [`frontend/src/lib/stellar.ts`](file:///Users/macosbigsur/Documents/Code/AutoMint/frontend/src/lib/stellar.ts): Connects to Freighter wallet, resolves active public keys, constructs Soroban contract invocations, and handles transaction signing and submission.
-2. [`frontend/src/lib/rpcRetry.ts`](file:///Users/macosbigsur/Documents/Code/AutoMint/frontend/src/lib/rpcRetry.ts): Robust exponential-backoff wrapper for Soroban RPC queries to prevent transient network errors from failing user requests.
-3. [`frontend/src/lib/constants.ts`](file:///Users/macosbigsur/Documents/Code/AutoMint/frontend/src/lib/constants.ts): Network passphrases, RPC URLs, contract IDs, and default parameters.
-4. [`frontend/src/lib/accrualLogic.ts`](file:///Users/macosbigsur/Documents/Code/AutoMint/frontend/src/lib/accrualLogic.ts): Pure client-side mathematical helpers for 24/7 interpolated points computation:
+1. [`frontend/src/lib/stellar.ts`](../frontend/src/lib/stellar.ts): Connects to Freighter wallet, resolves active public keys, constructs Soroban contract invocations, and handles transaction signing and submission.
+2. [`frontend/src/lib/rpcRetry.ts`](../frontend/src/lib/rpcRetry.ts): Robust exponential-backoff wrapper for Soroban RPC queries to prevent transient network errors from failing user requests.
+3. [`frontend/src/lib/constants.ts`](../frontend/src/lib/constants.ts): Network passphrases, RPC URLs, contract IDs, and default parameters.
+4. [`frontend/src/lib/accrualLogic.ts`](../frontend/src/lib/accrualLogic.ts): Pure client-side mathematical helpers for 24/7 interpolated points computation:
    $$\text{pending} = \frac{(\text{now} - \text{last\_claim\_ts}) \times \text{total\_rate}}{3600}$$
 
 ---
 
 ### Step 3: Soroban Contract Client Wrappers (`frontend/src/lib/contracts.ts`)
 
-Read [`frontend/src/lib/contracts.ts`](file:///Users/macosbigsur/Documents/Code/AutoMint/frontend/src/lib/contracts.ts) to see how Soroban XDR responses are translated into strongly-typed JavaScript objects:
+Read [`frontend/src/lib/contracts.ts`](../frontend/src/lib/contracts.ts) to see how Soroban XDR responses are translated into strongly-typed JavaScript objects:
 
 - `RegistryContract`: Methods for `register`, `getUser`, `isRegistered`, and `getLeaderboard`.
 - `BotNFTContract`: Methods for `mintBasic`, `mintTier`, `getUserBots`, `getBot`, `getUserTotalRate`, and `transfer`.
@@ -69,11 +69,11 @@ Read [`frontend/src/lib/contracts.ts`](file:///Users/macosbigsur/Documents/Code/
 
 Explore the custom React hooks that bridge lower-level contract calls with UI reactivity:
 
-- [`useWallet.ts`](file:///Users/macosbigsur/Documents/Code/AutoMint/frontend/src/hooks/useWallet.ts): Wallet connection state, network validation, and Freighter auto-reconnect.
-- [`useAccrual.ts`](file:///Users/macosbigsur/Documents/Code/AutoMint/frontend/src/hooks/useAccrual.ts): Fetches accrual state, calculates live client-side interpolated points, and handles point claim mutations.
-- [`useMarketplace.ts`](file:///Users/macosbigsur/Documents/Code/AutoMint/frontend/src/hooks/useMarketplace.ts): Queries active marketplace listings, handles bot listing, cancellation, and purchasing mutations.
-- [`useLeaderboard.ts`](file:///Users/macosbigsur/Documents/Code/AutoMint/frontend/src/hooks/useLeaderboard.ts): Fetches sorted leaderboard rankings with auto-refreshing React Query cache.
-- [`useBotDetails.ts`](file:///Users/macosbigsur/Documents/Code/AutoMint/frontend/src/hooks/useBotDetails.ts): Fetches individual bot NFT metadata and user bot inventories.
+- [`useWallet.ts`](../frontend/src/hooks/useWallet.ts): Wallet connection state, network validation, and Freighter auto-reconnect.
+- [`useAccrual.ts`](../frontend/src/hooks/useAccrual.ts): Fetches accrual state, calculates live client-side interpolated points, and handles point claim mutations.
+- [`useMarketplace.ts`](../frontend/src/hooks/useMarketplace.ts): Queries active marketplace listings, handles bot listing, cancellation, and purchasing mutations.
+- [`useLeaderboard.ts`](../frontend/src/hooks/useLeaderboard.ts): Fetches sorted leaderboard rankings with auto-refreshing React Query cache.
+- [`useBotDetails.ts`](../frontend/src/hooks/useBotDetails.ts): Fetches individual bot NFT metadata and user bot inventories.
 
 ---
 
@@ -81,11 +81,11 @@ Explore the custom React hooks that bridge lower-level contract calls with UI re
 
 Review modular visual components organized by feature area:
 
-- `ui/`: Primitive components ([`Modal.tsx`](file:///Users/macosbigsur/Documents/Code/AutoMint/frontend/src/components/ui/Modal.tsx), [`Skeleton.tsx`](file:///Users/macosbigsur/Documents/Code/AutoMint/frontend/src/components/ui/Skeleton.tsx)).
-- `layout/`: Global navigation ([`Header.tsx`](file:///Users/macosbigsur/Documents/Code/AutoMint/frontend/src/components/layout/Header.tsx), [`Footer.tsx`](file:///Users/macosbigsur/Documents/Code/AutoMint/frontend/src/components/layout/Footer.tsx)).
-- `dashboard/`: Mining stats, bot cards, claim button ([`PointsCounter.tsx`](file:///Users/macosbigsur/Documents/Code/AutoMint/frontend/src/components/dashboard/PointsCounter.tsx), [`BotCard.tsx`](file:///Users/macosbigsur/Documents/Code/AutoMint/frontend/src/components/dashboard/BotCard.tsx), [`ClaimButton.tsx`](file:///Users/macosbigsur/Documents/Code/AutoMint/frontend/src/components/dashboard/ClaimButton.tsx), [`UpgradePrompt.tsx`](file:///Users/macosbigsur/Documents/Code/AutoMint/frontend/src/components/dashboard/UpgradePrompt.tsx), [`RegistrationBanner.tsx`](file:///Users/macosbigsur/Documents/Code/AutoMint/frontend/src/components/dashboard/RegistrationBanner.tsx)).
-- `marketplace/`: Trading cards and forms ([`BotListingCard.tsx`](file:///Users/macosbigsur/Documents/Code/AutoMint/frontend/src/components/marketplace/BotListingCard.tsx), [`ListBotModal.tsx`](file:///Users/macosbigsur/Documents/Code/AutoMint/frontend/src/components/marketplace/ListBotModal.tsx)).
-- `leaderboard/`: On-chain rankings table ([`LeaderboardTable.tsx`](file:///Users/macosbigsur/Documents/Code/AutoMint/frontend/src/components/leaderboard/LeaderboardTable.tsx)).
+- `ui/`: Primitive components ([`Modal.tsx`](../frontend/src/components/ui/Modal.tsx), [`Skeleton.tsx`](../frontend/src/components/ui/Skeleton.tsx)).
+- `layout/`: Global navigation ([`Header.tsx`](../frontend/src/components/layout/Header.tsx), [`Footer.tsx`](../frontend/src/components/layout/Footer.tsx)).
+- `dashboard/`: Mining stats, bot cards, claim button ([`PointsCounter.tsx`](../frontend/src/components/dashboard/PointsCounter.tsx), [`BotCard.tsx`](../frontend/src/components/dashboard/BotCard.tsx), [`ClaimButton.tsx`](../frontend/src/components/dashboard/ClaimButton.tsx), [`UpgradePrompt.tsx`](../frontend/src/components/dashboard/UpgradePrompt.tsx), [`RegistrationBanner.tsx`](../frontend/src/components/dashboard/RegistrationBanner.tsx)).
+- `marketplace/`: Trading cards and forms ([`BotListingCard.tsx`](../frontend/src/components/marketplace/BotListingCard.tsx), [`ListBotModal.tsx`](../frontend/src/components/marketplace/ListBotModal.tsx)).
+- `leaderboard/`: On-chain rankings table ([`LeaderboardTable.tsx`](../frontend/src/components/leaderboard/LeaderboardTable.tsx)).
 
 ---
 
@@ -93,11 +93,11 @@ Review modular visual components organized by feature area:
 
 Finally, inspect the top-level Next.js pages:
 
-- [`page.tsx`](file:///Users/macosbigsur/Documents/Code/AutoMint/frontend/src/app/page.tsx): Landing page with feature overview, stats, and getting started CTA.
-- [`dashboard/page.tsx`](file:///Users/macosbigsur/Documents/Code/AutoMint/frontend/src/app/dashboard/page.tsx): Primary user dashboard for monitoring idle accrual, claiming `$AMT`, and managing owned bots.
-- [`marketplace/page.tsx`](file:///Users/macosbigsur/Documents/Code/AutoMint/frontend/src/app/marketplace/page.tsx): P2P marketplace browse page for listing and buying bot NFTs.
-- [`leaderboard/page.tsx`](file:///Users/macosbigsur/Documents/Code/AutoMint/frontend/src/app/leaderboard/page.tsx): Global rankings page showing top miners.
-- [`profile/page.tsx`](file:///Users/macosbigsur/Documents/Code/AutoMint/frontend/src/app/profile/page.tsx): User profile overview, bot inventory, and claimed token stats.
+- [`page.tsx`](../frontend/src/app/page.tsx): Landing page with feature overview, stats, and getting started CTA.
+- [`dashboard/page.tsx`](../frontend/src/app/dashboard/page.tsx): Primary user dashboard for monitoring idle accrual, claiming `$AMT`, and managing owned bots.
+- [`marketplace/page.tsx`](../frontend/src/app/marketplace/page.tsx): P2P marketplace browse page for listing and buying bot NFTs.
+- [`leaderboard/page.tsx`](../frontend/src/app/leaderboard/page.tsx): Global rankings page showing top miners.
+- [`profile/page.tsx`](../frontend/src/app/profile/page.tsx): User profile overview, bot inventory, and claimed token stats.
 
 ---
 
