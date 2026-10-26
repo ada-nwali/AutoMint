@@ -18,7 +18,7 @@
 //! | `State` | Instance | Initialized with the instance maximum TTL; state-changing token calls refresh the instance TTL. |
 //! | `Admin` | Instance | Shares the instance TTL and is refreshed on initialization/admin changes. |
 //! | `TotalSupply` | Persistent | Mint and burn refresh to the 180-day maximum TTL; dormant supply entries may archive. |
-//! | `MaxSupply` | Persistent | Set or removed by the admin; no separate entry TTL refresh is currently applied. |
+//! | `MaxSupply` | Persistent | Set or removed by the admin; refreshed on set and on read during mint. |
 //! | `Locked` | Persistent | Reserved-balance key; no writer currently exists, and future writes must define a TTL refresh policy. |
 //! | `MintLimit` | Instance | Admin-configured per-window ceiling; a zero ceiling disables the limit. |
 //! | `MintWindow` | Instance | Ledger window start and the amount minted in that window. |
@@ -685,7 +685,15 @@ impl AMTToken {
 
     /// Returns the max supply cap, if set (#339)
     pub fn max_supply(env: Env) -> Option<i128> {
-        env.storage().persistent().get(&DataKey::MaxSupply)
+        let key = DataKey::MaxSupply;
+        if let Some(cap) = env.storage().persistent().get(&key) {
+            env.storage()
+                .persistent()
+                .extend_ttl(&key, LEDGER_THRESHOLD, LEDGER_BUMP);
+            Some(cap)
+        } else {
+            None
+        }
     }
 
     /// Admin-only: set the maximum supply cap. Fails if cap is below current supply (#339)
@@ -706,7 +714,11 @@ impl AMTToken {
         }
 
         if let Some(cap) = new_cap {
-            env.storage().persistent().set(&DataKey::MaxSupply, &cap);
+            let key = DataKey::MaxSupply;
+            env.storage().persistent().set(&key, &cap);
+            env.storage()
+                .persistent()
+                .extend_ttl(&key, LEDGER_THRESHOLD, LEDGER_BUMP);
         } else {
             env.storage().persistent().remove(&DataKey::MaxSupply);
         }
@@ -1078,6 +1090,33 @@ mod test {
         let user = Address::generate(&env);
         client.mint(&user, &10_000_000_000_i128);
         assert_eq!(client.balance(&user), 10_000_000_000_i128);
+    }
+
+    #[test]
+    fn test_set_max_supply_and_ttl_extension() {
+        let (env, _admin, client) = setup();
+        assert_eq!(client.max_supply(), None);
+
+        // Set max supply cap to 1000
+        client.set_max_supply(&Some(1_000_i128));
+        assert_eq!(client.max_supply(), Some(1_000_i128));
+
+        let user = Address::generate(&env);
+        // Mint within cap succeeds
+        client.mint(&user, &600_i128);
+        assert_eq!(client.balance(&user), 600_i128);
+        assert_eq!(client.total_supply(), 600_i128);
+        assert_eq!(client.max_supply(), Some(1_000_i128));
+
+        // Mint exceeding cap fails
+        let res = client.try_mint(&user, &500_i128);
+        assert!(res.is_err());
+
+        // Remove max supply cap
+        client.set_max_supply(&None);
+        assert_eq!(client.max_supply(), None);
+        client.mint(&user, &500_i128);
+        assert_eq!(client.balance(&user), 1_100_i128);
     }
 
     #[test]
