@@ -213,7 +213,7 @@ function LeaderboardTableComponent({
               <td className="px-2 py-3 font-bold sm:px-4">
                 {pinnedRank.rank === null ? (
                   <span className="text-xs font-semibold uppercase tracking-wide text-muted">
-                    Not in top 100
+                    Unranked (Top 100 only)
                     <span className="sr-only">Unranked</span>
                   </span>
                 ) : (
@@ -235,7 +235,7 @@ function LeaderboardTableComponent({
                   </span>
                   {pinnedRank.rank === null ? (
                     <span className="text-xs text-muted">
-                      Claim points to enter the rankings
+                      Ranks tracked for Top 100 only — earn points to enter the top 100!
                     </span>
                   ) : (
                     pinnedRank.pointsToNextRank !== null && (

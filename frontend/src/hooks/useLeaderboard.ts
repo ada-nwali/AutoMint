@@ -50,10 +50,10 @@ export function useSeason() {
 /**
  * The connected wallet's own leaderboard standing.
  *
- * `useLeaderboard` only ever returns the top N, so every user outside that
- * cutoff sees a table they are not in. This resolves their position
- * separately — from the registry's `get_rank` when they sit below the
- * scanned window, otherwise from the leaderboard ordering itself.
+ * `useLeaderboard` returns the top N rows (default 50). The registry contract's
+ * `get_rank` queries the bounded on-chain TopUsers list (up to LEADERBOARD_SIZE = 100).
+ * Users within the top 100 receive their 1-based rank; users outside the top 100
+ * cutoff return UNRANKED (resolved as `null` rank).
  *
  * Resolves to `null` for an address with no registry profile, and the query
  * stays disabled entirely while no wallet is connected, so a visitor never
