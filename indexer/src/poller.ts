@@ -106,40 +106,46 @@ export class Poller {
       contracts: contractIds.length,
     });
 
+    const decoder = makeDecoder(this.config);
+    let totalInserted = 0;
+    let totalSkipped = 0;
+
     const { events, latestLedger } = await this.rpc.getEvents({
       startLedger,
       contractIds,
       signal,
+      onPage: async (page) => {
+        if (signal?.aborted) throw new Error("poll aborted by shutdown");
+        const decoded: DecodedEvent[] = [];
+        for (const raw of toRawEvents(page.events)) {
+          if (raw.inSuccessfulContractCall === false) {
+            totalSkipped += 1;
+            continue;
+          }
+          try {
+            decoded.push(decoder.decode(raw));
+          } catch (error) {
+            if (error instanceof DecodeError) {
+              totalSkipped += 1;
+              this.log(`skipping undecodable event ${raw.id}`, {
+                error: error.message,
+              });
+            } else {
+              throw error;
+            }
+          }
+        }
+        const inserted = this.db.insertEvents(decoded);
+        totalInserted += inserted;
+        if (page.events.length > 0) {
+          const maxLedger = Math.max(...page.events.map((e) => e.ledger));
+          this.db.saveCheckpoint(maxLedger);
+        }
+      },
     });
 
-    // Shutdown arrived mid-cycle: drop the fetched batch so the checkpoint
-    // stays put and the next start re-fetches it (#662, #1240).
-    if (signal?.aborted) throw new Error("poll aborted by shutdown");
-
-    const decoder = makeDecoder(this.config);
-    const decoded: DecodedEvent[] = [];
-    let skipped = 0;
-
-    for (const raw of toRawEvents(events)) {
-      if (raw.inSuccessfulContractCall === false) {
-        skipped += 1; // events from reverted/failed calls must not be counted
-        continue;
-      }
-      try {
-        decoded.push(decoder.decode(raw));
-      } catch (error) {
-        if (error instanceof DecodeError) {
-          skipped += 1;
-          this.log(`skipping undecodable event ${raw.id}`, {
-            error: error.message,
-          });
-        } else {
-          throw error;
-        }
-      }
-    }
-
-    const inserted = this.db.insertEvents(decoded);
+    const inserted = totalInserted;
+    const skipped = totalSkipped;
     if (latestLedger > 0) {
       this.db.saveCheckpoint(latestLedger);
     }

@@ -136,8 +136,9 @@ export class SorobanRpcClient implements RpcClient {
     cursor?: string;
     limit?: number;
     signal?: AbortSignal;
+    onPage?: (page: { events: RawRpcEvent[]; latestLedger: number; cursor?: string }) => Promise<void> | void;
   }): Promise<GetEventsResult> {
-    const { startLedger, contractIds, cursor: initialCursor, signal } = opts;
+    const { startLedger, contractIds, cursor: initialCursor, signal, onPage } = opts;
     const limit = opts.limit ?? this.maxPage;
 
     const filters = [
@@ -166,8 +167,9 @@ export class SorobanRpcClient implements RpcClient {
 
       latestLedger = Math.max(latestLedger, Number(response.latestLedger ?? 0));
 
+      const pageEvents: RawRpcEvent[] = [];
       for (const ev of response.events) {
-        allEvents.push({
+        pageEvents.push({
           id: ev.id,
           contractId: ev.contractId?.toString() ?? "",
           ledger: Number(ev.ledger),
@@ -179,6 +181,13 @@ export class SorobanRpcClient implements RpcClient {
           inSuccessfulContractCall: ev.inSuccessfulContractCall,
         });
       }
+
+      if (onPage) {
+        await onPage({ events: pageEvents, latestLedger, cursor: response.cursor || undefined });
+      } else {
+        allEvents.push(...pageEvents);
+      }
+
       cursor = response.cursor || undefined;
     } while (cursor);
 
