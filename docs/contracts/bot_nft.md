@@ -7,13 +7,14 @@ The Bot NFT contract mints, tracks, and transfers bot NFTs. Each bot has a `BotT
 ### initialize
 
 ```rust
-pub fn initialize(env: Env, admin: Address, registry: Address) -> Result<(), BotNFTError>
+pub fn initialize(env: Env, admin: Address, registry: Address, payment_token: Address) -> Result<(), BotNFTError>
 ```
 
-Initialize the contract with an admin address and the Registry contract address used for bot-count callbacks. Must be called once before minting.
+Initialize the contract with an admin address, the Registry contract address used for bot-count callbacks, and the payment token address used for purchasing paid bot tiers. Must be called once before minting.
 
 - `admin`: The contract administrator address.
 - `registry`: Address of the deployed Registry contract.
+- `payment_token`: Address of the SAC or custom token used to purchase bots.
 
 Errors:
 - `AlreadyInitialized`: The contract has already been initialized.
@@ -21,7 +22,7 @@ Errors:
 Example:
 
 ```rust
-bot_nft_client.initialize(&admin, &registry_id);
+bot_nft_client.initialize(&admin, &registry_id, &payment_token_id);
 ```
 
 ---
@@ -50,24 +51,27 @@ let bot_id = bot_nft_client.mint_basic(&owner);
 ### mint_tier
 
 ```rust
-pub fn mint_tier(env: Env, owner: Address, tier: Tier, token: Address) -> Result<u64, BotNFTError>
+pub fn mint_tier(env: Env, owner: Address, tier: Tier) -> Result<u64, BotNFTError>
 ```
 
-Mint a paid bot at the given `Tier` (`Basic`, `Advanced`, or `Premium`), charging `tier.price()` in `token` from `owner` to the contract if the price is greater than zero. Requires authorization from `owner`.
+Mint a paid bot at the given purchase `Tier` (`Basic`, `Advanced`, or `Premium`), charging `tier.price()` in the configured `payment_token` (stored during `initialize`) from `owner` to the contract if the price is greater than zero. Requires authorization from `owner`.
 
-- `tier`: The purchase tier; maps internally to a `BotTier` (`Advanced` → `BotTier::Bronze`, `Premium` → `BotTier::Silver`).
-- `token`: The token contract address used for payment.
+> **Note on `Tier` vs `BotTier`**:
+> - `Tier` is the purchase tier enum (`Basic`, `Advanced`, `Premium`) accepted by `mint_tier`.
+> - `BotTier` is the internal on-chain bot classification enum (`Basic`, `Bronze`, `Silver`, `Gold`, `Diamond`). `Tier::Basic` maps to `BotTier::Basic`, `Tier::Advanced` maps to `BotTier::Bronze`, and `Tier::Premium` maps to `BotTier::Silver`.
+
+- `tier`: The purchase tier (`Tier::Basic`, `Tier::Advanced`, or `Tier::Premium`).
 
 Returns the new bot ID.
 
 Errors:
 - `NotInitialized`: The contract has not been initialized.
-- The underlying token `transfer` call panics (surfaced as an error by `try_mint_tier`) if `owner` has insufficient balance.
+- The underlying payment token `transfer` call fails (surfaced as an error by `try_mint_tier`) if `owner` has insufficient balance.
 
 Example:
 
 ```rust
-let bot_id = bot_nft_client.mint_tier(&owner, &Tier::Advanced, &token_id);
+let bot_id = bot_nft_client.mint_tier(&owner, &Tier::Advanced);
 ```
 
 ---
