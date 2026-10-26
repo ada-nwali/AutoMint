@@ -116,6 +116,7 @@ export function useMintTierBot() {
       if (!publicKey) throw new Error("Wallet not connected");
 
       const BOT_NFT_CONTRACT_ID = process.env.NEXT_PUBLIC_BOT_NFT_CONTRACT_ID || "";
+      const txId = newTxId(`Mint ${tier}`);
 
       return new Promise((resolve, reject) => {
         executeTransaction({
@@ -128,6 +129,7 @@ export function useMintTierBot() {
           ],
           sourceAddress: publicKey,
           onStatus: (status: TransactionStatus) => {
+            trackStatus(txId, `Mint ${tier} Bot`, status);
             switch (status.stage) {
               case "building":
               case "simulating":

@@ -97,6 +97,7 @@ export function useRegister() {
         method: string,
         args: any[]
       ) => {
+        const stepTxId = newTxId(label);
         return new Promise((resolve, reject) => {
           executeTransaction({
             contractId,
@@ -104,6 +105,7 @@ export function useRegister() {
             args,
             sourceAddress: publicKey,
             onStatus: (status: TransactionStatus) => {
+              trackStatus(stepTxId, label, status);
               switch (status.stage) {
                 case "building":
                   toast.loading(`${label}: Building transaction...`, { id: label });
