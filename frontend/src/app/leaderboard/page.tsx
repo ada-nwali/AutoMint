@@ -49,7 +49,7 @@ export default function LeaderboardPage() {
   const publicKey = useWalletStore(selectPublicKey);
   // #506 — the table only holds the top 50; this is how everyone else finds
   // out where they stand. Disabled while no wallet is connected.
-  const { data: currentUserRank } = useRank();
+  const { data: currentUserRank } = useRank(selectedSeason ?? undefined);
 
   // #202 — surface load failures the same way the rest of the app does
   // (sonner toast), in addition to the inline ErrorState component.
@@ -167,7 +167,7 @@ export default function LeaderboardPage() {
         <LeaderboardTable
           users={leaderboardData.map((user, index) => ({ ...user, rank: index + 1 }))}
           currentAddress={publicKey}
-          currentUserRank={seasonView ? null : currentUserRank ?? null}
+          currentUserRank={currentUserRank ?? null}
           accrualStates={accrualStates}
           profiles={profiles}
         />

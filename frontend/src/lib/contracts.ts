@@ -1404,3 +1404,66 @@ export function preflight(sourceAddress?: string): Promise<PreflightReport> {
 
   return _preflightCache;
 }
+
+export async function getRegistrySeasonRank(
+  season: number,
+  userAddress: string,
+  sourceAddress: string
+): Promise<number | null> {
+  try {
+    const raw = await simulateContractCall<number | bigint>(
+      CONTRACT_ADDRESSES.registry,
+      "get_season_rank",
+      [
+        nativeToScVal(season, { type: "u32" }),
+        nativeToScVal(userAddress, { type: "address" }),
+      ],
+      sourceAddress
+    );
+    const rank = Number(raw);
+    if (!Number.isInteger(rank) || rank <= 0 || rank >= UNRANKED_SENTINEL) {
+      return null;
+    }
+    return rank;
+  } catch (error) {
+    if (isMissingGetRankMethod(error)) return null;
+    throw error;
+  }
+}
+
+export async function getUserSeasonRank(
+  season: number,
+  userAddress: string,
+  sourceAddress?: string
+): Promise<UserRank | null> {
+  const source = sourceAddress ?? userAddress;
+  const board = await getLeaderboardForSeason(season, RANK_WINDOW, source);
+  const index = board.findIndex((entry) => entry.address === userAddress);
+  const self = index >= 0 ? board[index] : undefined;
+
+  if (self) {
+    const above = index > 0 ? board[index - 1] : undefined;
+    return {
+      address: self.address,
+      username: self.username,
+      rank: index + 1,
+      points: self.points,
+      pointsToNextRank: above ? above.points - self.points : null,
+    };
+  }
+
+  const [rank, profile] = await Promise.all([
+    getRegistrySeasonRank(season, userAddress, source),
+    getUserProfile(userAddress),
+  ]);
+
+  if (!profile) return null;
+
+  return {
+    address: profile.address || userAddress,
+    username: profile.username || truncateAddress(userAddress),
+    rank,
+    points: profile.season_points ?? 0n,
+    pointsToNextRank: null,
+  };
+}

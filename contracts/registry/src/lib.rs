@@ -1006,6 +1006,27 @@ impl RegistryContract {
         Ok(UNRANKED)
     }
 
+    /// Look up a user's 1-based rank on a specific season's leaderboard (#1452).
+    /// Returns [`UNRANKED`] if the user is registered but outside the top
+    /// `LEADERBOARD_SIZE`, or [`RegistryError::NotRegistered`] if the user has
+    /// never registered.
+    pub fn get_season_rank(env: Env, season: u32, user: Address) -> Result<u32, RegistryError> {
+        if !env
+            .storage()
+            .persistent()
+            .has(&DataKey::UserProfile(user.clone()))
+        {
+            return Err(RegistryError::NotRegistered);
+        }
+        let top = Self::load_season_top(&env, season);
+        for (idx, (addr, _)) in (0_u32..).zip(top.iter()) {
+            if addr == user {
+                return Ok(idx + 1);
+            }
+        }
+        Ok(UNRANKED)
+    }
+
     /// Cached count of registered users. A missing record (queried before
     /// `initialize()`) correctly defaults to 0 — zero registered users is
     /// the true state, not an error. Reconciled against the paged user

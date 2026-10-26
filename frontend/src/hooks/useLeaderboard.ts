@@ -4,6 +4,7 @@ import {
   getLeaderboardForSeason,
   getSeason,
   getUserRank,
+  getUserSeasonRank,
   type UserRank,
 } from "@/lib/contracts";
 import { useWalletStore, selectPublicKey } from "@/store/walletStore";
@@ -59,12 +60,18 @@ export function useSeason() {
  * stays disabled entirely while no wallet is connected, so a visitor never
  * triggers a contract call.
  */
-export function useRank() {
+export function useRank(season?: number) {
   const publicKey = useWalletStore(selectPublicKey);
+  const activeSeason = season !== undefined && season > 0 ? season : undefined;
 
   return useQuery<UserRank | null>({
-    queryKey: ["rank", publicKey],
-    queryFn: () => (publicKey ? getUserRank(publicKey) : Promise.resolve(null)),
+    queryKey: ["rank", publicKey, activeSeason],
+    queryFn: () => {
+      if (!publicKey) return Promise.resolve(null);
+      return activeSeason !== undefined
+        ? getUserSeasonRank(activeSeason, publicKey)
+        : getUserRank(publicKey);
+    },
     enabled: !!publicKey,
     refetchInterval: pollWhenVisible(),
     staleTime: 15_000,
