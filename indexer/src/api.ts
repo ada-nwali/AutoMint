@@ -75,14 +75,27 @@ export function createApiServer(opts: ApiOptions): express.Express {
   });
 
   app.get("/api/health", (_req, res) => {
-    res.json({
+    const extra = opts.extraHealth ? opts.extraHealth() : {};
+    const health = {
       ok: true,
       network: config.network,
       checkpoint_ledger: db.latestLedger(),
       last_indexed_at: db.lastIndexedAt(),
       contracts: config.contracts,
-      ...(opts.extraHealth ? opts.extraHealth() : {}),
-    });
+      ...extra,
+    };
+    const statusCode = health.ok ? 200 : 503;
+    res.status(statusCode).json(health);
+  });
+
+  app.get("/livez", (_req, res) => {
+    res.status(200).send("OK");
+  });
+
+  app.get("/readyz", (_req, res) => {
+    const extra = opts.extraHealth ? opts.extraHealth() : {};
+    const isReady = extra.ok !== false;
+    res.status(isReady ? 200 : 503).send(isReady ? "READY" : "NOT_READY");
   });
 
   app.use((err: unknown, _req: express.Request, res: express.Response, next: express.NextFunction) => {

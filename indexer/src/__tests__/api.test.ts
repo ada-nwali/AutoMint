@@ -177,7 +177,9 @@ describe("aggregate API", () => {
     listen = srv;
     base = `http://127.0.0.1:${(srv.address() as AddressInfo).port}`;
 
-    const body = await fetch(`${base}/api/health`).then((res) => res.json());
+    const res = await fetch(`${base}/api/health`);
+    expect(res.status).toBe(503);
+    const body = await res.json();
     expect(body.ok).toBe(false);
     expect(body.liveness.ok).toBe(true);
     expect(body.readiness).toMatchObject({
