@@ -1,5 +1,4 @@
 import { useQuery } from "@tanstack/react-query";
-import { getAllTiers } from "@/lib/contracts";
 import { STALE_TIME, GC_TIME, qk } from "@/lib/queryKeys";
 import type { BotTier, TierInfo } from "@/types";
 
@@ -13,7 +12,10 @@ import type { BotTier, TierInfo } from "@/types";
 export function useTiers() {
   return useQuery<Record<BotTier, TierInfo>>({
     queryKey: qk.tiers(),
-    queryFn: () => getAllTiers(),
+    queryFn: async () => {
+      const { getAllTiers } = await import("@/lib/contracts");
+      return getAllTiers();
+    },
     staleTime: STALE_TIME.STATIC,
     gcTime: GC_TIME.LONG,
   });

@@ -4,7 +4,6 @@
  * All NEXT_PUBLIC_* vars are inlined at build time by Next.js.
  * Non-public vars are only accessible server-side.
  */
-import { StrKey } from "@stellar/stellar-sdk";
 
 /**
  * Soroban RPC endpoints used for transaction simulation and submission.
@@ -148,7 +147,7 @@ export function validateEnv(env: Record<string, string | undefined> = process.en
       continue;
     }
     try {
-      if (!StrKey.isValidContract(id)) {
+      if (!/^C[A-Z2-7]{55}$/.test(id)) {
         problems.push(`${name} failed StrKey checksum validation — check for a typo in .env.local`);
       }
     } catch {
