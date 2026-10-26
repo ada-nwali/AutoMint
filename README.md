@@ -121,7 +121,7 @@ AutoMint/
   rustup target add wasm32v1-none
   cargo install --locked stellar-cli --version 21.4.0 --features opt
   ```
-- **Node.js 18+ & npm** (for frontend development):
+- **Node.js 20+ & npm** (for frontend and indexer development):
   ```bash
   node -v
   npm -v
@@ -153,7 +153,16 @@ AutoMint/
    ```
    Open [http://localhost:3000](http://localhost:3000) in your browser.
 
-4. **Deploy Contracts to Testnet (Optional)**:
+4. **Set Up & Run the Indexer (Optional)**:
+   For local event indexing and database ingestion, see the [Indexer Documentation](indexer/README.md):
+   ```bash
+   cd indexer
+   npm install
+   npm run build
+   npm test
+   ```
+
+5. **Deploy Contracts to Testnet (Optional)**:
    ```bash
    # Generate testnet identity and fund via Friendbot
    stellar keys generate mykey --network testnet
