@@ -22,6 +22,7 @@ const LeaderboardTable = dynamic(
 export default function LeaderboardPage() {
   // #371 — "All-time" vs the current season board. `null` = all-time.
   const [selectedSeason, setSelectedSeason] = useState<number | null>(null);
+  const [limit, setLimit] = useState<number>(50);
   const { data: season } = useSeason();
   const seasonAvailable = typeof season === "number" && season > 0;
   const activeSeason =
@@ -35,7 +36,7 @@ export default function LeaderboardPage() {
     error,
     refetch,
     isRefetching,
-  } = useLeaderboard(undefined, activeSeason);
+  } = useLeaderboard(limit, activeSeason);
   // Season rows carry their own display names; the all-time overlays
   // (lifetime accruals, batch profiles, personal pin) stay all-time only —
   // an empty address list keeps both batch queries disabled in season view.
@@ -164,13 +165,26 @@ export default function LeaderboardPage() {
 
       {/* Populated table */}
       {!isLoading && !isError && leaderboardData && leaderboardData.length > 0 && (
-        <LeaderboardTable
-          users={leaderboardData.map((user, index) => ({ ...user, rank: index + 1 }))}
-          currentAddress={publicKey}
-          currentUserRank={seasonView ? null : currentUserRank ?? null}
-          accrualStates={accrualStates}
-          profiles={profiles}
-        />
+        <>
+          <LeaderboardTable
+            users={leaderboardData.map((user, index) => ({ ...user, rank: index + 1 }))}
+            currentAddress={publicKey}
+            currentUserRank={seasonView ? null : currentUserRank ?? null}
+            accrualStates={accrualStates}
+            profiles={profiles}
+          />
+          {leaderboardData.length >= 50 && limit < 100 && (
+            <div className="mt-6 flex justify-center">
+              <button
+                type="button"
+                onClick={() => setLimit(100)}
+                className="rounded-xl border border-liner bg-card px-6 py-2.5 text-sm font-semibold text-text transition hover:border-purple/50 hover:bg-card/80"
+              >
+                Show More (Top 100)
+              </button>
+            </div>
+          )}
+        </>
       )}
     </main>
   );
