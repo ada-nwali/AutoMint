@@ -1648,10 +1648,19 @@ impl MarketplaceContract {
         if Self::effective_owner(env, &bot) == buyer {
             return Err(MarketplaceError::OfferOnOwnBot);
         }
-        let mut bot_offers = Self::read_bot_offers(env, bot_id);
-        if bot_offers.len() >= MAX_OFFERS_PER_BOT {
+        let bot_offers = Self::read_bot_offers(env, bot_id);
+        let mut active_offers: Vec<u64> = Vec::new(env);
+        for id in bot_offers.iter() {
+            if let Some(off) = Self::read_offer(env, id) {
+                if off.status == OfferStatus::Active && off.expires_at > now {
+                    active_offers.push_back(id);
+                }
+            }
+        }
+        if active_offers.len() >= MAX_OFFERS_PER_BOT {
             return Err(MarketplaceError::TooManyOffers);
         }
+        let mut bot_offers = active_offers;
 
         let offer_id: u64 = env
             .storage()
