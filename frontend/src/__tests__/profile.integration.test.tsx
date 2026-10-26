@@ -64,7 +64,7 @@ const MOCK_PROFILE = {
   username: 'ada_girly',
   registeredAt: BigInt(1700000000),
   points: BigInt(2500),
-  claimedAmt: BigInt(123_456_789),
+  claimedAmt: BigInt(12),
   botCount: 2,
   address: 'GABC1234TESTWALLETADDRESSXYZ',
 };
@@ -129,8 +129,8 @@ describe('Profile Page Integration', () => {
     // Total points
     expect(screen.getByText('2,500')).toBeInTheDocument();
 
-    // Claimed AMT (123_456_789 / 10_000_000 = 12.35)
-    expect(screen.getByText('12.35 AMT')).toBeInTheDocument();
+    // Claimed AMT (unscaled whole units #1448)
+    expect(screen.getByText('12.00 AMT')).toBeInTheDocument();
 
     // Bot count card
     expect(screen.getByText('Total Bots')).toBeInTheDocument();

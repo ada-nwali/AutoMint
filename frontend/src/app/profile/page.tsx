@@ -100,8 +100,11 @@ export default function ProfilePage() {
 
   const formatAmt = (amt?: bigint) => {
     if (!amt) return "0.00";
-    const amtNumber = Number(amt) / 10_000_000;
-    return amtNumber.toFixed(2);
+    // The registry stores whole AMT directly (unscaled count #1448).
+    return Number(amt).toLocaleString("en-US", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
   };
 
   const walletAddr = profile.address || publicKey;
