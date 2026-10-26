@@ -1251,9 +1251,21 @@ impl BotNFTContract {
     /// enforced here, contract-side, and callers paginate past it with the
     /// ID-based getters (#483).
     pub fn get_user_bots_detailed(env: Env, user: Address) -> Vec<BotNFT> {
+        Self::get_user_bots_paged(env, user, 0, MAX_DETAILED_BOTS as u32)
+    }
+
+    /// Paged `BotNFT` records for bots owned by `user` starting at offset `start`
+    /// up to `limit` (capped contract-side at `MAX_DETAILED_BOTS` = 50) (#1443).
+    pub fn get_user_bots_paged(
+        env: Env,
+        user: Address,
+        start: u32,
+        limit: u32,
+    ) -> Vec<BotNFT> {
         let ids = Self::get_user_bots(env.clone(), user);
+        let capped_limit = (limit as usize).min(MAX_DETAILED_BOTS);
         let mut bots = Vec::new(&env);
-        for id in ids.iter().take(MAX_DETAILED_BOTS) {
+        for id in ids.iter().skip(start as usize).take(capped_limit) {
             if let Ok(bot) = Self::get_bot(env.clone(), id) {
                 bots.push_back(bot);
             }
@@ -1797,6 +1809,11 @@ mod test {
             client.get_user_bots_detailed(&user).len(),
             MAX_DETAILED_BOTS as u32
         );
+
+        // #1443: get_user_bots_paged allows retrieving the remaining bots past the 50 cap
+        let paged = client.get_user_bots_paged(&user, &50, &10);
+        assert_eq!(paged.len(), 1);
+        assert_eq!(paged.get(0).map(|b| b.tier), Some(BotTier::Bronze));
     }
 
     #[test]

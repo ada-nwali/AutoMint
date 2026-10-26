@@ -135,14 +135,32 @@ pub fn get_user_bots_detailed(env: Env, user: Address) -> Vec<BotNFT>
 
 Return the full `BotNFT` records for up to the first `MAX_DETAILED_BOTS` (50)
 bots owned by `user`, in ownership order. One simulation replaces an N+1
-fan-out of `get_user_bots` + `get_bot` for dashboards. The cap is enforced
-contract-side; callers needing more paginate with `get_user_bots` +
-`get_bot`.
+fan-out of `get_user_bots` + `get_bot` for dashboards. For paging past the
+first 50 bots, see [`get_user_bots_paged`](#get_user_bots_paged).
 
 Example:
 
 ```rust
 let bots = bot_nft_client.get_user_bots_detailed(&user);
+```
+
+---
+
+### get_user_bots_paged
+
+```rust
+pub fn get_user_bots_paged(env: Env, user: Address, start: u32, limit: u32) -> Vec<BotNFT>
+```
+
+Return paged full `BotNFT` records owned by `user` starting from 0-based offset `start` up to `limit` records (capped contract-side at `MAX_DETAILED_BOTS` = 50 per call).
+
+- `start`: 0-based index offset in the user's owned bot list.
+- `limit`: Number of bot records requested (maximum 50).
+
+Example:
+
+```rust
+let next_bots = bot_nft_client.get_user_bots_paged(&user, &50, &50);
 ```
 
 ---
