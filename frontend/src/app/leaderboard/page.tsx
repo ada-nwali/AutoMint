@@ -76,10 +76,10 @@ export default function LeaderboardPage() {
         </div>
       </div>
 
-      {/* #371 — period toggle; hidden until the registry reports a season. */}
-      {seasonAvailable && (
+      {/* #371, #1450 — period selector; browse all-time or any past season 1..season */}
+      {seasonAvailable && season && (
         <div
-          className="mb-6 flex gap-2"
+          className="mb-6 flex flex-wrap items-center gap-2"
           data-testid="season-toggle"
           role="group"
           aria-label="Leaderboard period"
@@ -98,20 +98,23 @@ export default function LeaderboardPage() {
           >
             All-time
           </button>
-          <button
-            type="button"
-            onClick={() => setSelectedSeason(season)}
-            aria-pressed={selectedSeason !== null}
-            data-testid="toggle-season"
-            className={clsx(
-              "rounded-full border px-3 py-1 text-xs font-semibold transition-colors",
-              selectedSeason !== null
-                ? "border-gold/60 bg-gold/15 text-gold"
-                : "border-liner text-muted hover:text-text",
-            )}
-          >
-            Season {season}
-          </button>
+          {Array.from({ length: season }, (_, i) => season - i).map((s) => (
+            <button
+              key={s}
+              type="button"
+              onClick={() => setSelectedSeason(s)}
+              aria-pressed={selectedSeason === s}
+              data-testid={s === season ? "toggle-season" : `toggle-season-${s}`}
+              className={clsx(
+                "rounded-full border px-3 py-1 text-xs font-semibold transition-colors",
+                selectedSeason === s
+                  ? "border-gold/60 bg-gold/15 text-gold"
+                  : "border-liner text-muted hover:text-text",
+              )}
+            >
+              Season {s}
+            </button>
+          ))}
         </div>
       )}
 
