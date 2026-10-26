@@ -13,6 +13,7 @@ import { executeTransaction } from '@/lib/transaction';
 import { useWalletStore } from '@/store/walletStore';
 import { toast } from 'sonner';
 import type { MarketplaceListing } from '@/types';
+import { scValToNative } from '@stellar/stellar-sdk';
 
 // Mock dependencies
 jest.mock('@/lib/contracts');
@@ -77,6 +78,9 @@ describe('useMarketplace Hooks', () => {
       const call = mockExecuteTransaction.mock.calls[0][0];
       expect(call.method).toBe('buy_bot');
       expect(call.sourceAddress).toBe(mockPublicKey);
+      expect(call.args).toBeDefined();
+      expect(call.args).toHaveLength(1);
+      expect(scValToNative(call.args[0])).toBe(1n);
       expect(toast.success).toHaveBeenCalledWith(
         'Bot purchased successfully!',
         expect.objectContaining({ id: 'buy_bot' })
@@ -136,6 +140,9 @@ describe('useMarketplace Hooks', () => {
       const call = mockExecuteTransaction.mock.calls[0][0];
       expect(call.method).toBe('mint_tier');
       expect(call.sourceAddress).toBe(mockPublicKey);
+      expect(call.args).toBeDefined();
+      expect(call.args.length).toBeGreaterThanOrEqual(2);
+      expect(scValToNative(call.args[0])).toBe(mockPublicKey);
       expect(toast.success).toHaveBeenCalledWith(
         'Tier bot minted successfully!',
         expect.objectContaining({ id: 'mint_tier' })
@@ -243,6 +250,8 @@ describe('useMarketplace Hooks', () => {
       const call = mockExecuteTransaction.mock.calls[0][0];
       expect(call.method).toBe('list_bot');
       expect(call.sourceAddress).toBe(mockPublicKey);
+      expect(call.args).toBeDefined();
+      expect(call.args.length).toBeGreaterThanOrEqual(2);
       expect(toast.success).toHaveBeenCalledWith(
         'Bot listed successfully!',
         expect.objectContaining({ id: 'list_bot' })
@@ -285,6 +294,9 @@ describe('useMarketplace Hooks', () => {
       const call = mockExecuteTransaction.mock.calls[0][0];
       expect(call.method).toBe('cancel_listing');
       expect(call.sourceAddress).toBe(mockPublicKey);
+      expect(call.args).toBeDefined();
+      expect(call.args).toHaveLength(1);
+      expect(scValToNative(call.args[0])).toBe(1n);
       expect(toast.success).toHaveBeenCalledWith(
         'Listing cancelled successfully!',
         expect.objectContaining({ id: 'cancel_listing' })
