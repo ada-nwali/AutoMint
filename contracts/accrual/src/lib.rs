@@ -312,8 +312,32 @@ impl AccrualContract {
     ///
     /// Auth: admin only. Fails with `NotInitialized` when the contract has
     /// no admin.
+    /// Admin-only: block a user from claiming or syncing points (#413, #1447).
+    /// Accrued points earned up to the moment of the freeze are banked into
+    /// `carry_points` and `last_claim_ts` is set to the current timestamp.
+    /// While frozen, points do not accrue. Emits `freeze` with `true`.
     pub fn freeze(env: Env, user: Address) -> Result<(), AccrualError> {
         require_admin(&env)?;
+        if let Some(mut accrual) = env
+            .storage()
+            .persistent()
+            .get::<_, UserAccrual>(&DataKey::UserAccrual(user.clone()))
+        {
+            let now = env.ledger().timestamp();
+            let (earned, leftover) = calculate_accrued_points(
+                now,
+                accrual.last_claim_ts,
+                accrual.rate,
+                accrual.leftover,
+            );
+            accrual.carry_points = accrual.carry_points.saturating_add(earned);
+            accrual.lifetime_points = accrual.lifetime_points.saturating_add(earned);
+            accrual.last_claim_ts = now;
+            accrual.leftover = leftover;
+            env.storage()
+                .persistent()
+                .set(&DataKey::UserAccrual(user.clone()), &accrual);
+        }
         env.storage()
             .persistent()
             .set(&DataKey::Frozen(user.clone()), &true);
@@ -326,13 +350,24 @@ impl AccrualContract {
         Ok(())
     }
 
-    /// Admin-only: lift a freeze previously set by [`Self::freeze`].
+    /// Admin-only: lift a freeze previously set by [`Self::freeze`] (#413, #1447).
+    /// Advances `last_claim_ts` to the current ledger timestamp so that no
+    /// points are accrued for the duration the account remained frozen.
     /// Emits `freeze` with `false`.
-    ///
-    /// Auth: admin only. Fails with `NotInitialized` when the contract has
-    /// no admin.
     pub fn unfreeze(env: Env, user: Address) -> Result<(), AccrualError> {
         require_admin(&env)?;
+        if let Some(mut accrual) = env
+            .storage()
+            .persistent()
+            .get::<_, UserAccrual>(&DataKey::UserAccrual(user.clone()))
+        {
+            let now = env.ledger().timestamp();
+            accrual.last_claim_ts = now;
+            accrual.leftover = 0;
+            env.storage()
+                .persistent()
+                .set(&DataKey::UserAccrual(user.clone()), &accrual);
+        }
         env.storage()
             .persistent()
             .remove(&DataKey::Frozen(user.clone()));
