@@ -60,13 +60,13 @@ flowchart TD
 
 ### Bot Tiers & Mining Rates
 
-| Tier | Price | Mining Rate | Points Required for 1 `$AMT` |
-|---|---|---|---|
-| **Basic** | Free | 1 pt/hr | 100 points |
-| **Bronze** | 500 XLM | 5 pt/hr | 100 points |
-| **Silver** | 2,000 XLM | 25 pt/hr | 100 points |
-| **Gold** | 7,500 XLM | 100 pt/hr | 100 points |
-| **Diamond** | 25,000 XLM | 500 pt/hr | 100 points |
+| Tier | Price | Mining Rate | Points Required for 1 `$AMT` | Acquisition |
+|---|---|---|---|---|
+| **Basic** | Free | 1 pt/hr | 100 points | `mint_basic` |
+| **Bronze** | 500 AMT | 5 pt/hr | 100 points | `mint_tier(Advanced)` |
+| **Silver** | 2,000 AMT | 25 pt/hr | 100 points | `mint_tier(Premium)` |
+| **Gold** | Season Reward | 100 pt/hr | 100 points | Gameplay & Season Leaderboard |
+| **Diamond** | Season Reward | 500 pt/hr | 100 points | Gameplay & Season Leaderboard |
 
 *Marketplace Trading Fee: 2.5% (250 bps).*
 

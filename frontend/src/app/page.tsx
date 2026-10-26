@@ -161,9 +161,11 @@ export default function HomePage() {
                   <p className="font-display text-xl font-bold text-text">
                     {!info
                       ? "—"
-                      : info.price === 0n
-                        ? "Free"
-                        : `${stroopsToXlmString(info.price)} XLM`}
+                      : tier === "Gold" || tier === "Diamond"
+                        ? "Season Reward"
+                        : info.price === 0n
+                          ? "Free"
+                          : `${stroopsToXlmString(info.price)} AMT`}
                   </p>
                 </div>
               );
