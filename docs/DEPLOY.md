@@ -14,7 +14,7 @@ Operator runbook for deploying the five AutoMint Soroban contracts to Stellar **
 |---|---|---|
 | Rust toolchain | `rustc --version` | 1.74+ recommended |
 | `wasm32v1-none` target | `rustup target list --installed \| grep wasm32` | Install with `rustup target add wasm32v1-none` |
-| Stellar CLI | `stellar --version` (v21.4.0) | Install with `cargo install --locked stellar-cli --version 21.4.0` |
+| Stellar CLI | `stellar --version` (v22.x) | Install with `cargo install --locked stellar-cli --version 22.0.0` |
 | Network reachability | `curl -s https://horizon-testnet.stellar.org` | Deploy needs outbound HTTPS to Horizon and Soroban RPC |
 
 Configure the testnet network once so `--network testnet` resolves:

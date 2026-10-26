@@ -54,8 +54,8 @@ Thank you for contributing to AutoMint! This codebase is built through open-sour
    features so production wasm stays lean and reproducible — see
    `docs/DEPENDENCIES.md`. 
    
-   > **Note**: We also pin `stellar-cli` to version `21.4.0`. Install it exactly via:
-   > `cargo install --locked stellar-cli --version 21.4.0 --features opt`
+   > **Note**: We also pin `stellar-cli` to version `22.0.0`. Install it exactly via:
+   > `cargo install --locked stellar-cli --version 22.0.0 --features opt`
    
    Before bumping any dependency, review the diff:
 

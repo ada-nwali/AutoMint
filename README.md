@@ -119,7 +119,7 @@ AutoMint/
   ```bash
   curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
   rustup target add wasm32v1-none
-  cargo install --locked stellar-cli --version 21.4.0 --features opt
+  cargo install --locked stellar-cli --version 22.0.0 --features opt
   ```
 - **Node.js 18+ & npm** (for frontend development):
   ```bash
