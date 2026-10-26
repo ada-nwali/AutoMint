@@ -1093,13 +1093,17 @@ impl BotNFTContract {
         if name.len() > 24 {
             return Err(BotNFTError::NicknameTooLong);
         }
-        stored.nickname = if name.is_empty() { None } else { Some(name) };
+        stored.nickname = if name.is_empty() { None } else { Some(name.clone()) };
         env.storage()
             .persistent()
             .set(&DataKey::Bot(bot_id), &stored);
         env.storage()
             .persistent()
             .extend_ttl(&DataKey::Bot(bot_id), LEDGER_THRESHOLD, LEDGER_BUMP);
+        env.events().publish(
+            (symbol_short!("rename"), stored.owner.clone(), bot_id),
+            name,
+        );
         Ok(())
     }
 
@@ -2142,6 +2146,11 @@ mod test {
             client.get_bot(&bot_id).nickname,
             Some(String::from_str(&env, "Sparky"))
         );
+        let all_events = env.events().all();
+        let found = all_events.iter().any(|e| {
+            e.1 == (symbol_short!("rename"), user.clone(), bot_id).into_val(&env)
+        });
+        assert!(found);
     }
 
     #[test]
