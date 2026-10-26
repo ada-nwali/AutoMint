@@ -8,6 +8,8 @@ module.exports = {
         "http://localhost:3000/",
         "http://localhost:3000/dashboard",
         "http://localhost:3000/marketplace",
+        "http://localhost:3000/leaderboard",
+        "http://localhost:3000/profile",
       ],
       numberOfRuns: 3,
       settings: {
