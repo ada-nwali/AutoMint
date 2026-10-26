@@ -1,6 +1,6 @@
 import { useCallback, useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { requestAccess, getAddress, getNetwork } from "@stellar/freighter-api";
+import { requestAccess, getAddress, getNetwork, watchWalletChanges } from "@stellar/freighter-api";
 import { toast } from "sonner";
 import {
   useWalletStore,
@@ -291,9 +291,26 @@ export function useWallet() {
       }
     };
 
+    // #1455: Subscribe to Freighter wallet changes for instant detection
+    let unsubscribe: (() => void) | undefined;
+    try {
+      if (typeof watchWalletChanges === "function") {
+        unsubscribe = watchWalletChanges(checkWalletState);
+      }
+    } catch {
+      // Fallback to polling if watchWalletChanges is unavailable in the current browser runtime
+    }
+
     const intervalId = setInterval(checkWalletState, DASHBOARD_POLL_MS);
     window.addEventListener("focus", checkWalletState);
     return () => {
+      if (typeof unsubscribe === "function") {
+        try {
+          unsubscribe();
+        } catch {
+          // Ignore unsubscribe errors
+        }
+      }
       clearInterval(intervalId);
       window.removeEventListener("focus", checkWalletState);
     };
