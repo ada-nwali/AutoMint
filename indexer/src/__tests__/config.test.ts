@@ -7,6 +7,7 @@ import {
   loadContractConfig,
   assertCompleteConfig,
   isContractAddress,
+  readDotEnvLocal,
   type LoadedConfig,
 } from "../config.js";
 import { CREG, CBOT, CACC, CMAR, CTOK } from "./helpers.js";
@@ -129,3 +130,28 @@ describe("loadContractConfig", () => {
     expect(() => assertCompleteConfig(loaded)).not.toThrow();
   });
 });
+
+describe("readDotEnvLocal (#1243)", () => {
+  it("strips trailing comments and accepts optional export prefix and quotes", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "am-dotenv-"));
+    const envFile = path.join(dir, ".env.local");
+    fs.writeFileSync(
+      envFile,
+      [
+        "# Full line comment",
+        "",
+        "AM_REGISTRY_CONTRACT_ID=C123 # testnet registry",
+        'export AM_TOKEN_CONTRACT_ID="C456" # testnet token',
+        "export AM_BOT_NFT_CONTRACT_ID='C789'",
+        "AM_MARKETPLACE_CONTRACT_ID=CMKT",
+      ].join("\n"),
+    );
+
+    const parsed = readDotEnvLocal(envFile);
+    expect(parsed.AM_REGISTRY_CONTRACT_ID).toBe("C123");
+    expect(parsed.AM_TOKEN_CONTRACT_ID).toBe("C456");
+    expect(parsed.AM_BOT_NFT_CONTRACT_ID).toBe("C789");
+    expect(parsed.AM_MARKETPLACE_CONTRACT_ID).toBe("CMKT");
+  });
+});
+

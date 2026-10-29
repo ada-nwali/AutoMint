@@ -18,14 +18,15 @@
 #                       [--wasm-dir DIR] [<network>] [<identity>]
 #
 # Flags:
-#   --network NET   Soroban network alias (default: testnet)
-#   --identity ID   Stellar key identity to use as source (default: mykey)
-#   --force         Re-deploy AND re-initialize every contract even if the
-#                   manifest already records them (full redeploy).
-#   --dry-run       Print every action that would be taken and exit 0 WITHOUT
-#                   deploying, invoking, building, or writing anything.
-#   --wasm-dir DIR  Directory holding the built contract wasm
-#                   (default: target/wasm32v1-none/release)
+#   --network NET      Soroban network alias (default: testnet)
+#   --identity ID      Stellar key identity to use as source (default: mykey)
+#   --force            Re-deploy AND re-initialize every contract even if the
+#                      manifest already records them (full redeploy).
+#   --dry-run          Print every action that would be taken and exit 0 WITHOUT
+#                      deploying, invoking, building, or writing anything.
+#   --wasm-dir DIR     Directory holding the built contract wasm
+#                      (default: target/wasm32v1-none/release)
+#   --royalty-bps BPS  Creator royalty basis points for marketplace (default: 500, env: AM_ROYALTY_BPS)
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -38,16 +39,19 @@ FORCE=false
 DRY_RUN=false
 WASM_DIR="target/wasm32v1-none/release"
 RUST_TOOLCHAIN=""
+ROYALTY_BPS="${AM_ROYALTY_BPS:-500}"
 
 # ── Argument parsing (flags, with legacy positional network/identity fallback)
 POSITIONAL=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --network)   NETWORK="$2";   shift 2 ;;
-    --identity)  IDENTITY="$2";  shift 2 ;;
-    --wasm-dir)  WASM_DIR="$2";  shift 2 ;;
-    --force)     FORCE=true;     shift   ;;
-    --dry-run)   DRY_RUN=true;   shift   ;;
+    --network)       NETWORK="$2";       shift 2 ;;
+    --identity)      IDENTITY="$2";      shift 2 ;;
+    --wasm-dir)      WASM_DIR="$2";      shift 2 ;;
+    --fee-bps)       FEE_BPS="$2";       shift 2 ;;
+    --royalty-bps)   ROYALTY_BPS="$2";   shift 2 ;;
+    --force)         FORCE=true;         shift   ;;
+    --dry-run)       DRY_RUN=true;       shift   ;;
     --help|-h)
       sed -n '2,30p' "${BASH_SOURCE[0]}"
       exit 0 ;;
@@ -290,12 +294,56 @@ verify_contract() {  # <name>
     return 0
   fi
 
-  local admin_addr
-  admin_addr="$(stellar contract invoke --id "$id" --source "$IDENTITY" --network "$NETWORK" -- admin 2>/dev/null || true)"
+  local admin_addr=""
+  local err_output=""
+  local tmp_err
+  tmp_err="$(mktemp)"
+
+  case "$name" in
+    token|bot_nft)
+      admin_addr="$(stellar contract invoke --id "$id" --source "$IDENTITY" --network "$NETWORK" -- admin 2>"$tmp_err" || true)"
+      ;;
+    registry)
+      admin_addr="$(stellar contract invoke --id "$id" --source "$IDENTITY" --network "$NETWORK" -- get_admin 2>"$tmp_err" || true)"
+      ;;
+    accrual)
+      admin_addr="$(stellar contract invoke --id "$id" --source "$IDENTITY" --network "$NETWORK" -- get_accrual_admin 2>"$tmp_err" || true)"
+      ;;
+    marketplace)
+      # Marketplace has no admin() getter (#1252); verify config
+      local cfg
+      cfg="$(stellar contract invoke --id "$id" --source "$IDENTITY" --network "$NETWORK" -- config 2>"$tmp_err" || true)"
+      if [[ -n "$cfg" ]]; then
+        admin_addr="$(echo "$cfg" | jq -r '.admin // empty' 2>/dev/null || true)"
+        [[ -z "$admin_addr" ]] && admin_addr="$cfg"
+      fi
+      if [[ -z "$admin_addr" ]]; then
+        err_output="$(cat "$tmp_err" 2>/dev/null || true)"
+        rm -f "$tmp_err"
+        if [[ -n "$err_output" ]]; then
+          log "WARNING: could not verify $name config ($err_output)"
+        else
+          log "$name verified (no admin getter implemented)"
+        fi
+        return 0
+      fi
+      ;;
+    *)
+      admin_addr="$(stellar contract invoke --id "$id" --source "$IDENTITY" --network "$NETWORK" -- admin 2>"$tmp_err" || true)"
+      ;;
+  esac
+
+  err_output="$(cat "$tmp_err" 2>/dev/null || true)"
+  rm -f "$tmp_err"
+
   if [[ -n "$admin_addr" ]]; then
     log "$name verified (admin: $admin_addr)"
   else
-    log "WARNING: could not verify $name admin — is it initialized?"
+    if [[ -n "$err_output" ]]; then
+      log "WARNING: could not verify $name admin ($err_output) — is it initialized?"
+    else
+      log "WARNING: could not verify $name admin — is it initialized?"
+    fi
   fi
 }
 
@@ -474,7 +522,7 @@ verify_contract accrual
 
 deploy_contract marketplace
 init_contract marketplace initialize --admin "$ADMIN_ADDRESS" \
-  --bot-nft "$(resolve_id bot_nft)" --fee-bps 250
+  --bot-nft "$(resolve_id bot_nft)" --fee-bps 250 --royalty-bps "$ROYALTY_BPS"
 verify_contract marketplace
 
 # 3b. Wire the Accrual contract as the Token's admin so claims can mint AMT.
