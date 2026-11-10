@@ -362,6 +362,17 @@ impl RegistryContract {
             return Err(RegistryError::InvalidUsername);
         }
 
+        // #1454: Restrict usernames to a safe charset [a-zA-Z0-9_].
+        // Rejects invisible unicode points, zero-width spaces, lookalikes, and control bytes.
+        let mut raw_buf = [0u8; 32];
+        let raw_len = (username.len() as usize).min(raw_buf.len());
+        username.copy_into_slice(&mut raw_buf[..raw_len]);
+        for &b in &raw_buf[..raw_len] {
+            if !(b.is_ascii_alphanumeric() || b == b'_') {
+                return Err(RegistryError::InvalidUsername);
+            }
+        }
+
         // #373: uniqueness is checked against the ASCII-lowercased form so
         // `Alice` and `alice` are the same identity; the original casing the
         // user typed is preserved in `display_name`.
@@ -878,20 +889,12 @@ impl RegistryContract {
         true
     }
 
-    /// Incrementally maintain the bounded top-N list (#332). Cost is O(N) with
-    /// N = `LEADERBOARD_SIZE`, independent of total user count. Points only
-    /// ever increase, so a user already listed is removed and re-placed by the
-    /// tiebreak (#368); an unlisted user enters only if they outrank the floor.
-    fn update_top(env: &Env, user: &Address, new_total: u64) {
-        let mut top = Self::load_top(env);
     /// In-place bounded top-N maintenance (#332 lifetime board, #371 season
     /// boards). Cost is O(N) with N = `LEADERBOARD_SIZE`, independent of total
     /// user count. Points only ever increase, so a user already listed is
     /// moved up; an unlisted user enters only if the list has room or strictly
-    /// beats the current floor (a tie with the floor keeps the incumbent, who
-    /// reached the total first). Returns `true` when `top` was modified.
-    fn apply_to_top(top: &mut Vec<(Address, u64)>, user: &Address, new_total: u64) -> bool {
-        let mut was_listed = false;
+    /// beats the current floor via tiebreak (#368). Returns `true` when `top` was modified.
+    fn apply_to_top(env: &Env, top: &mut Vec<(Address, u64)>, user: &Address, new_total: u64) -> bool {
         let mut i = 0;
         while i < top.len() {
             if top.get(i).unwrap().0 == *user {
@@ -900,38 +903,13 @@ impl RegistryContract {
             }
             i += 1;
         }
-        if Self::place_in_top(env, &mut top, user, new_total) {
-            env.storage().instance().set(&DataKey::TopUsers, &top);
-        }
-
-        if !was_listed && top.len() >= LEADERBOARD_SIZE {
-            let floor = top.last().map(|e| e.1).unwrap_or(0);
-            if new_total <= floor {
-                return false; // list unchanged (nothing was removed)
-            }
-        }
-
-        // Insert after every entry with points >= new_total (stable ties).
-        let mut pos = top.len();
-        let mut k = 0;
-        while k < top.len() {
-            if top.get(k).unwrap().1 < new_total {
-                pos = k;
-                break;
-            }
-            k += 1;
-        }
-        top.insert(pos, (user.clone(), new_total));
-        if top.len() > LEADERBOARD_SIZE {
-            top.pop_back();
-        }
-        true
+        Self::place_in_top(env, top, user, new_total)
     }
 
     /// Incrementally maintain the bounded top-N lifetime list (#332).
     fn update_top(env: &Env, user: &Address, new_total: u64) {
         let mut top = Self::load_top(env);
-        if Self::apply_to_top(&mut top, user, new_total) {
+        if Self::apply_to_top(env, &mut top, user, new_total) {
             env.storage().instance().set(&DataKey::TopUsers, &top);
         }
     }
@@ -953,7 +931,7 @@ impl RegistryContract {
     /// sharing the lifetime board's eviction/tie semantics.
     fn update_season_top(env: &Env, season: u32, user: &Address, new_total: u64) {
         let mut top = Self::load_season_top(env, season);
-        if Self::apply_to_top(&mut top, user, new_total) {
+        if Self::apply_to_top(env, &mut top, user, new_total) {
             env.storage()
                 .instance()
                 .set(&DataKey::SeasonTop(season), &top);
@@ -1083,6 +1061,27 @@ impl RegistryContract {
             return Err(RegistryError::NotRegistered);
         }
         let top = Self::load_top(&env);
+        for (idx, (addr, _)) in (0_u32..).zip(top.iter()) {
+            if addr == user {
+                return Ok(idx + 1);
+            }
+        }
+        Ok(UNRANKED)
+    }
+
+    /// Season-specific rank lookup (#1452). Scans the bounded `SeasonTop(season)`
+    /// list for `user`. Returns 1-based rank (1 to `LEADERBOARD_SIZE`) or
+    /// `UNRANKED` if not present. Returns [`RegistryError::NotRegistered`]
+    /// if `user` has not registered.
+    pub fn get_season_rank(env: Env, season: u32, user: Address) -> Result<u32, RegistryError> {
+        if !env
+            .storage()
+            .persistent()
+            .has(&DataKey::UserProfile(user.clone()))
+        {
+            return Err(RegistryError::NotRegistered);
+        }
+        let top = Self::load_season_top(&env, season);
         for (idx, (addr, _)) in (0_u32..).zip(top.iter()) {
             if addr == user {
                 return Ok(idx + 1);
@@ -3394,3 +3393,101 @@ mod overflow_tests {
         assert_eq!(client.total_users(), u32::MAX);
     }
 }
+
+// ── Issues #1454 & #1452: Safe username charset and season rank lookup ────
+#[cfg(test)]
+mod issue_1454_1452_tests {
+    use super::*;
+    use soroban_sdk::{testutils::Address as _, Env, String};
+
+    #[test]
+    fn test_register_username_charset_validation() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let id = env.register_contract(None, RegistryContract);
+        let client = RegistryContractClient::new(&env, &id);
+        let admin = Address::generate(&env);
+        client.initialize(&admin);
+
+        // 1. Valid safe charsets [a-zA-Z0-9_] succeed
+        let u1 = Address::generate(&env);
+        assert!(client.try_register(&u1, &String::from_str(&env, "alice_123")).is_ok());
+
+        let u2 = Address::generate(&env);
+        assert!(client.try_register(&u2, &String::from_str(&env, "Bob_Builder_99")).is_ok());
+
+        // 2. Space is rejected
+        let u3 = Address::generate(&env);
+        assert_eq!(
+            client.try_register(&u3, &String::from_str(&env, "alice smith")),
+            Err(Ok(RegistryError::InvalidUsername))
+        );
+
+        // 3. Special punctuation is rejected
+        let u4 = Address::generate(&env);
+        assert_eq!(
+            client.try_register(&u4, &String::from_str(&env, "alice!")),
+            Err(Ok(RegistryError::InvalidUsername))
+        );
+        assert_eq!(
+            client.try_register(&u4, &String::from_str(&env, "alice@work")),
+            Err(Ok(RegistryError::InvalidUsername))
+        );
+
+        // 4. Invisible / non-ASCII unicode points (e.g. \u{200b}) rejected
+        assert_eq!(
+            client.try_register(&u4, &String::from_str(&env, "alice\u{200b}")),
+            Err(Ok(RegistryError::InvalidUsername))
+        );
+    }
+
+    #[test]
+    fn test_get_season_rank_lookup() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let id = env.register_contract(None, RegistryContract);
+        let client = RegistryContractClient::new(&env, &id);
+        let admin = Address::generate(&env);
+        client.initialize(&admin);
+
+        let writer = Address::generate(&env);
+        client.set_writers(&writer, &writer);
+
+        let u1 = Address::generate(&env);
+        let u2 = Address::generate(&env);
+        let u3 = Address::generate(&env);
+        let unregistered = Address::generate(&env);
+
+        client.register(&u1, &String::from_str(&env, "user1"));
+        client.register(&u2, &String::from_str(&env, "user2"));
+        client.register(&u3, &String::from_str(&env, "user3"));
+
+        // In season 0, grant points
+        client.add_points(&u1, &500);
+        client.add_points(&u2, &1000);
+
+        // Season 0 rank check
+        assert_eq!(client.get_season_rank(&0, &u2), 1);
+        assert_eq!(client.get_season_rank(&0, &u1), 2);
+        assert_eq!(client.get_season_rank(&0, &u3), UNRANKED);
+
+        // Unregistered check fails with NotRegistered
+        assert_eq!(
+            client.try_get_season_rank(&0, &unregistered),
+            Err(Ok(RegistryError::NotRegistered))
+        );
+
+        // Start season 1
+        client.start_new_season();
+        assert_eq!(client.get_season(), 1);
+
+        // In season 1, initially nobody has points yet
+        assert_eq!(client.get_season_rank(&1, &u2), UNRANKED);
+
+        // User 3 earns points in season 1
+        client.add_points(&u3, &300);
+        assert_eq!(client.get_season_rank(&1, &u3), 1);
+        assert_eq!(client.get_season_rank(&1, &u2), UNRANKED);
+    }
+}
+
