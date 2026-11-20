@@ -18,6 +18,62 @@ The indexer listens to events from the **five deployed contracts**:
 
 ## Representation notes
 
+
+## Token (AMT) contract
+
+| Event | Topics (after name) | Data | Emitted in |
+|-------|---------------------|------|-----------|
+| `approve` | `[from: Address, spender: Address]` | `(amount: i128, expiration_ledger: u32)` | `approve()` |
+| `burn` | `[from: Address]` | `amount: i128` | `burn()` / `burn_from()` |
+| `mint` | `[admin: Address, to: Address]` | `amount: i128` | `mint()` (admin; SAC shape, #347) |
+| `transfer` | `[from: Address, to: Address]` | `amount: i128` | `transfer()` / `transfer_from()` / `transfer_batch()` (one event per recipient) |
+| `admin_proposed` | `[current_admin: Address]` | `new_admin: Address` | `set_admin()` (step 1 of the two-step transfer) |
+| `set_admin` | `[previous_admin: Address]` | `new_admin: Address` | `accept_admin()` (step 2: the transfer takes effect) |
+| `admin_cancel` | *(none)* | `pending_admin: Address` | `cancel_admin_transfer()` |
+| `mintlim` | `[admin: Address]` | `(max_per_window: i128, window_ledgers: u32)` | `set_mint_limit()` |
+| `limithit` | `[admin: Address]` | `(amount: i128, max_per_window: i128, minted_in_window: i128)` | `mint()` when the mint limit would be exceeded (see note) |
+| `maxsup` | *(none)* | `new_cap: i128` (`-1` = cap removed) | `set_max_supply()` |
+| `pause` | *(none)* | `true` (bool) | `pause()` (#336) |
+| `unpause` | *(none)* | `false` (bool) | `unpause()` (#336) |
+| `upgrade` | *(none)* | `()` (void; decodes to `null`) | `upgrade()` (#336) |
+| `metadata` | *(none)* | `(old_name: String, old_symbol: String, new_name: String, new_symbol: String)` | `set_metadata()` |
+
+Notes on the admin and configuration events:
+
+- **`pause` / `unpause`** carry the new paused state as their data, so `pause`
+  is always `true` and `unpause` always `false`. Calling `pause()` on an
+  already-paused contract still publishes `pause`; treat the latest of the two
+  events as the current state rather than counting them.
+- **`upgrade`** has no topics after the name and a void payload. It does not
+  include the new WASM hash; read that from the transaction's
+  `upgrade(new_wasm_hash)` argument if needed.
+- **`mintlim`**: `max_per_window = 0` means the mint limiter is **disabled**
+  (`window_ledgers` is then meaningless). A non-zero limit always comes with a
+  non-zero `window_ledgers`.
+- **`limithit`** is published immediately before `mint()` returns
+  `TokenError::MintLimitExceeded`. Because the call then fails, the event
+  belongs to a **failed** contract call: on-chain it is only visible as a
+  diagnostic event with `inSuccessfulContractCall == false`, so **the indexer
+  skips it** (see *Representation notes*). It is documented here so the schema
+  is complete; alerting on rejected mints has to come from diagnostic events or
+  failed transactions, not from the indexed `events` table. `minted_in_window`
+  is the amount already minted in the current window **before** the rejected
+  mint.
+- **`maxsup`**: `set_max_supply(None)` removes the cap and publishes `-1`; any
+  value `>= 0` is the new cap. The cap can never be set below the current
+  total supply.
+- **`metadata`** carries both the previous and the new name and symbol, so an
+  indexer can show a rename history without reading contract state. Decimals
+  are immutable and never appear in this event.
+- **Admin transfer** is two-step. `set_admin()` only *proposes* and publishes
+  `admin_proposed`; the admin actually changes when the nominee calls
+  `accept_admin()`, which publishes `set_admin`. `admin_cancel` means the
+  proposal was withdrawn and the admin did not change.
+
+None of these configuration events feed an aggregate today; they are stored in
+the raw `events` table only.
+
+
 - Every event is published with `env.events().publish(topics_tuple, data)`.
   The first topic is always a `symbol` — the event name. The remaining topics
   are indexed as `topics[1..]`; the value is the `data` payload.
