@@ -12,6 +12,7 @@ import {
   useAmtDecimals,
 } from "@/hooks/useAccrual";
 import { useAllBotDetails } from "@/hooks/useBotDetails";
+import { usePauseStatus } from "@/hooks/usePauseStatus";
 import { getPendingPoints, bumpUserBots } from "@/lib/contracts";
 import { useState, useEffect } from "react";
 import { Skeleton } from "@/components/ui/Skeleton";
@@ -20,6 +21,8 @@ import ClaimButton from "@/components/dashboard/ClaimButton";
 import BotCard from "@/components/dashboard/BotCard";
 import RegistrationBanner from "@/components/dashboard/RegistrationBanner";
 import UpgradePrompt from "@/components/dashboard/UpgradePrompt";
+import TierShop from "@/components/dashboard/TierShop";
+import SendBotModal from "@/components/dashboard/SendBotModal";
 import { ErrorState } from "@/components/ui/ErrorState";
 import { Wallet, Loader2, Bot } from "lucide-react";
 import clsx from "clsx";
@@ -77,8 +80,10 @@ export default function DashboardPage() {
   const { data: amtBalance, isPending: isAmtBalancePending } = useAmtBalance();
   const { data: amtDecimals } = useAmtDecimals();
   const claim = useClaim();
+  const { claimPaused } = usePauseStatus();
 
   const [pendingPoints, setPendingPoints] = useState<bigint>(BigInt(0));
+  const [sendingBot, setSendingBot] = useState<BotNFT | null>(null);
 
   const isAnyError = isRegError || isProfileError || isBotsError || isAccrualError || isBotsDetailsError;
   const activeError = regError || profileError || botsError || accrualError || botsDetailsError;
@@ -307,11 +312,15 @@ export default function DashboardPage() {
               pendingPoints={pendingPoints}
               onClaim={handleClaim}
               isClaiming={claim.isPending}
+              isPaused={claimPaused}
             />
           )}
 
           {/* Upgrade Prompt */}
           <UpgradePrompt currentRate={totalRate} />
+
+          {/* Paid tier purchase (mint_tier) */}
+          <TierShop />
         </div>
 
         {/* Right column - Bot Grid */}
@@ -348,7 +357,11 @@ export default function DashboardPage() {
           ) : bots && bots.length > 0 ? (
             <div className="grid gap-4 sm:grid-cols-2">
               {bots.map((bot: BotNFT) => (
-                <BotCard key={bot.id.toString()} bot={bot} />
+                <BotCard
+                  key={bot.id.toString()}
+                  bot={bot}
+                  onSend={() => setSendingBot(bot)}
+                />
               ))}
             </div>
           ) : (
@@ -363,6 +376,10 @@ export default function DashboardPage() {
           )}
         </div>
       </div>
+
+      {sendingBot && (
+        <SendBotModal bot={sendingBot} isOpen onClose={() => setSendingBot(null)} />
+      )}
     </div>
   );
 }

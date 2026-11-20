@@ -125,4 +125,17 @@ describe("ClaimButton", () => {
       expect(screen.getByRole("button", { name: /Claim Rewards/i })).toBeEnabled();
     });
   });
+
+  describe("token paused (#1416)", () => {
+    it("disables the button and explains that claiming is paused", async () => {
+      render(
+        <ClaimButton pendingPoints={500} onClaim={mockOnClaim} isClaiming={false} isPaused />,
+      );
+      const btn = screen.getByRole("button", { name: /Claiming Paused/i });
+      expect(btn).toBeDisabled();
+      expect(btn).toHaveAttribute("title", expect.stringMatching(/AMT token is paused/i));
+      await userEvent.click(btn);
+      expect(mockOnClaim).not.toHaveBeenCalled();
+    });
+  });
 });

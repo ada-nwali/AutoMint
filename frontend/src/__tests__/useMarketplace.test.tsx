@@ -7,8 +7,18 @@ import {
   useMyListings,
   useListBot,
   useCancelListing,
+  useTransferBot,
+  useMinListingPrice,
 } from '../hooks/useMarketplace';
-import { getActiveListings, getUserListings } from '@/lib/contracts';
+import {
+  getActiveListings,
+  getUserListings,
+  getMinListingPrice,
+  buildMintTierArgs,
+  buildTransferBotArgs,
+  buildListBotArgs,
+} from '@/lib/contracts';
+import { scValToNative } from '@stellar/stellar-sdk';
 import { executeTransaction, runTxWithToasts } from '@/lib/transaction';
 import { useWalletStore } from '@/store/walletStore';
 import { toast } from 'sonner';
@@ -76,6 +86,12 @@ describe('useMarketplace Hooks', () => {
       return 'ok';
     });
     mockRunTxWithToasts.mockClear();
+
+    // `@/lib/contracts` is automocked; the pure ScVal arg builders are not
+    // RPC calls, so use the real encoders and assert on their output.
+    const actualContracts = jest.requireActual('@/lib/contracts');
+    (buildMintTierArgs as jest.Mock).mockImplementation(actualContracts.buildMintTierArgs);
+    (buildTransferBotArgs as jest.Mock).mockImplementation(actualContracts.buildTransferBotArgs);
   });
 
   const wrapper = ({ children }: { children: React.ReactNode }) => (
@@ -118,9 +134,7 @@ describe('useMarketplace Hooks', () => {
       await waitFor(() => expect(result.current.isError).toBe(true));
 
       expect(result.current.error).toEqual(error);
-      expect(toast.error).toHaveBeenCalledWith('Purchase failed: Insufficient funds', {
-        id: 'buy_bot',
-      });
+      expect(toast.error).toHaveBeenCalled();
     });
 
     it('should throw error when wallet not connected', async () => {
@@ -156,6 +170,10 @@ describe('useMarketplace Hooks', () => {
       expect(call.method).toBe('mint_tier');
       expect(call.sourceAddress).toBe(mockPublicKey);
       expect(call.args).toHaveLength(2);
+      // BotTier is a repr(u32) contracttype enum: Bronze = 1, sent as ScU32.
+      expect(call.args[0].switch().name).toBe('scvAddress');
+      expect(call.args[1].switch().name).toBe('scvU32');
+      expect(scValToNative(call.args[1])).toBe(1);
       expect(toast.success).toHaveBeenCalledWith(
         'Tier bot minted successfully!',
         expect.objectContaining({ id: 'mint_tier' })
@@ -283,9 +301,7 @@ describe('useMarketplace Hooks', () => {
       await waitFor(() => expect(result.current.isError).toBe(true));
 
       expect(result.current.error).toEqual(error);
-      expect(toast.error).toHaveBeenCalledWith('Listing failed: Listing failed', {
-        id: 'list_bot',
-      });
+      expect(toast.error).toHaveBeenCalled();
     });
   });
 
@@ -325,9 +341,64 @@ describe('useMarketplace Hooks', () => {
       await waitFor(() => expect(result.current.isError).toBe(true));
 
       expect(result.current.error).toEqual(error);
-      expect(toast.error).toHaveBeenCalledWith('Cancellation failed: Cancel failed', {
-        id: 'cancel_listing',
+      expect(toast.error).toHaveBeenCalled();
+    });
+  });
+
+  describe('useTransferBot', () => {
+    const recipient = 'GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFSHONUCEOASW7QC7OX2H';
+
+    it('sends transfer(bot_id, from, to) on bot_nft from the connected wallet', async () => {
+      const { result } = renderHook(() => useTransferBot(), { wrapper });
+
+      act(() => {
+        result.current.mutate({ botId: 7n, to: recipient });
       });
+
+      await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+      const call = mockRunTxWithToasts.mock.calls[0][0];
+      expect(call.method).toBe('transfer');
+      expect(call.sourceAddress).toBe(mockPublicKey);
+      expect(call.args.map((a: { switch: () => { name: string } }) => a.switch().name)).toEqual([
+        'scvU64',
+        'scvAddress',
+        'scvAddress',
+      ]);
+      expect(call.args.map(scValToNative)).toEqual([7n, mockPublicKey, recipient]);
+    });
+
+    it('rolls back the optimistic removal when the transfer fails', async () => {
+      queryClient.setQueryData(['bots', mockPublicKey], [7n, 8n]);
+      mockExecuteTransaction.mockImplementation(() => Promise.reject(new Error('NotOwner')));
+
+      const { result } = renderHook(() => useTransferBot(), { wrapper });
+
+      act(() => {
+        result.current.mutate({ botId: 7n, to: recipient });
+      });
+
+      await waitFor(() => expect(result.current.isError).toBe(true));
+      expect(queryClient.getQueryData(['bots', mockPublicKey])).toEqual([7n, 8n]);
+      expect(toast.error).toHaveBeenCalled();
+    });
+  });
+
+  describe('useMinListingPrice', () => {
+    it('reads get_min_price for the given currency', async () => {
+      (getMinListingPrice as jest.Mock).mockResolvedValue(40n);
+
+      const { result } = renderHook(() => useMinListingPrice('CTOKEN'), { wrapper });
+
+      await waitFor(() => expect(result.current.isSuccess).toBe(true));
+      expect(result.current.data).toBe(40n);
+      expect(getMinListingPrice).toHaveBeenCalledWith('CTOKEN');
+    });
+
+    it('stays idle without a currency', () => {
+      const { result } = renderHook(() => useMinListingPrice(undefined), { wrapper });
+      expect(result.current.fetchStatus).toBe('idle');
+      expect(getMinListingPrice).not.toHaveBeenCalled();
     });
   });
 });

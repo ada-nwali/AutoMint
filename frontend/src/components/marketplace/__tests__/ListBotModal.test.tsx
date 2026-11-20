@@ -17,6 +17,15 @@ jest.mock("@/hooks/useMarketplace", () => ({
     isPending: false,
   }),
   useMarketplaceConfig: () => ({ data: mockMarketplaceConfig }),
+  useTokenDecimals: () => ({ data: 7 }),
+  useTokenSymbol: () => ({ data: "XLM" }),
+  useMinListingPrice: () => ({ data: mockMinPrice.value }),
+}));
+
+const mockMinPrice: { value: bigint | undefined } = { value: undefined };
+const mockPause = { listPaused: false };
+jest.mock("@/hooks/usePauseStatus", () => ({
+  usePauseStatus: () => mockPause,
 }));
 
 // Mock modal wrapper to render inline
@@ -48,6 +57,8 @@ describe("ListBotModal (#514, #528)", () => {
     jest.clearAllMocks();
     mockMarketplaceConfig.feeBps = 250;
     mockMarketplaceConfig.royaltyBps = 0;
+    mockMinPrice.value = undefined;
+    mockPause.listPaused = false;
   });
 
   it("renders with a visible, programmatically associated label and help text", async () => {
@@ -149,5 +160,52 @@ describe("ListBotModal (#514, #528)", () => {
       { botId: 1n, price: 100_000_000n },
       expect.any(Object)
     );
+  });
+
+  describe("minimum listing price (#1417)", () => {
+    it("rejects a price below get_min_price before the signature prompt", async () => {
+      mockMinPrice.value = 50_000_000n; // 5 XLM
+      render(<ListBotModal bot={MOCK_BOT} isOpen={true} onClose={jest.fn()} />);
+
+      const input = screen.getByLabelText(/Listing Price/i);
+      await userEvent.type(input, "4.9999999");
+
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        /Price must be at least 5 XLM \(marketplace minimum\)/i,
+      );
+      const submitBtn = screen.getByRole("button", { name: /List for Sale/i });
+      expect(submitBtn).toBeDisabled();
+      fireEvent.click(submitBtn);
+      expect(mockListBotMutate).not.toHaveBeenCalled();
+    });
+
+    it("accepts a price exactly at the minimum", async () => {
+      mockMinPrice.value = 50_000_000n;
+      render(<ListBotModal bot={MOCK_BOT} isOpen={true} onClose={jest.fn()} />);
+
+      await userEvent.type(screen.getByLabelText(/Listing Price/i), "5");
+      fireEvent.click(screen.getByRole("button", { name: /List for Sale/i }));
+
+      expect(mockListBotMutate).toHaveBeenCalledWith(
+        { botId: 1n, price: 50_000_000n },
+        expect.any(Object),
+      );
+    });
+
+    it("shows the minimum in the help text", () => {
+      mockMinPrice.value = 40n; // default ceil(10_000 / 250) base units
+      render(<ListBotModal bot={MOCK_BOT} isOpen={true} onClose={jest.fn()} />);
+      expect(screen.getByText(/Minimum: 0.000004 XLM/i)).toBeInTheDocument();
+    });
+  });
+
+  it("disables listing while the marketplace is paused (#1416)", async () => {
+    mockPause.listPaused = true;
+    render(<ListBotModal bot={MOCK_BOT} isOpen={true} onClose={jest.fn()} />);
+
+    await userEvent.type(screen.getByLabelText(/Listing Price/i), "10");
+
+    expect(screen.getByRole("button", { name: /List for Sale/i })).toBeDisabled();
+    expect(screen.getByText(/unavailable while the marketplace is paused/i)).toBeInTheDocument();
   });
 });

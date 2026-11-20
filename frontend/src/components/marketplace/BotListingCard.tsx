@@ -20,6 +20,8 @@ interface BotListingCardProps {
   onCancel: (listingId: bigint) => void;
   isBuying?: boolean;
   isCancelling?: boolean;
+  /** True while the marketplace or payment token is paused — `buy_bot` would fail (#1416). */
+  isBuyPaused?: boolean;
 }
 
 function truncateAddress(address: string): string {
@@ -37,6 +39,7 @@ export default function BotListingCard({
   onCancel,
   isBuying = false,
   isCancelling = false,
+  isBuyPaused: buyPaused = false,
 }: BotListingCardProps) {
   // #476: listings carry their own bot_tier now, so the card no longer
   // needs `bot` (a separate per-row lookup) just to know the tier — `bot`
@@ -53,6 +56,8 @@ export default function BotListingCard({
   const { data: currencyDecimals = 7 } = useTokenDecimals(listing.currency);
   const { data: currencySymbol = "…" } = useTokenSymbol(listing.currency);
   const priceDisplay = fromBaseUnits(listing.price, currencyDecimals);
+
+  const buyDisabled = isBuying || !connectedAddress || buyPaused;
 
   const isOwner =
     connectedAddress !== null && listing.seller.toLowerCase() === connectedAddress.toLowerCase();
@@ -209,27 +214,35 @@ export default function BotListingCard({
           <button
             type="button"
             onClick={() => setIsBuyingConfirmed(true)}
-            disabled={isBuying || !connectedAddress}
+            disabled={buyDisabled}
             data-testid={`buy-btn-${listing.id.toString()}`}
             aria-label={
               !connectedAddress
                 ? `Connect your wallet to buy ${botLabel}`
-                : isBuying
-                  ? `Buying ${botLabel}`
-                  : `Buy ${botLabel} for ${priceDisplay.toLocaleString("en-US", { maximumFractionDigits: 2 })} ${currencySymbol}`
+                : buyPaused
+                  ? `Buying ${botLabel} is unavailable while trading is paused`
+                  : isBuying
+                    ? `Buying ${botLabel}`
+                    : `Buy ${botLabel} for ${priceDisplay.toLocaleString("en-US", { maximumFractionDigits: 2 })} ${currencySymbol}`
             }
-            title={!connectedAddress ? "Connect your wallet to buy" : undefined}
+            title={
+              !connectedAddress
+                ? "Connect your wallet to buy"
+                : buyPaused
+                  ? "Buying is unavailable while trading is paused"
+                  : undefined
+            }
             className={clsx(
               "flex items-center justify-center gap-2 rounded-xl border px-4 py-2.5",
               "text-sm font-medium transition-all",
               "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold focus-visible:ring-offset-2 focus-visible:ring-offset-card",
-              isBuying || !connectedAddress
+              buyDisabled
                 ? "border-liner bg-card-2 text-muted cursor-not-allowed opacity-50"
                 : "border-gold/30 bg-gold/10 text-gold hover:bg-gold/20 hover:border-gold/50",
             )}
           >
             <ShoppingCart className="h-4 w-4" aria-hidden="true" />
-            {isBuying ? "Buying..." : "Buy"}
+            {isBuying ? "Buying..." : buyPaused ? "Paused" : "Buy"}
           </button>
         </>
       )}

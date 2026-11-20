@@ -1,7 +1,7 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { Bot, Clock, Zap, Tag, Circle, Shield, Hexagon, Crown, Gem } from "lucide-react";
+import { Bot, Clock, Zap, Tag, Send, Circle, Shield, Hexagon, Crown, Gem } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import clsx from "clsx";
 import { BOT_TIER_NAMES, BOT_TIER_COLORS, BOT_TIER_BG_COLORS } from "@/types";
@@ -10,6 +10,8 @@ import type { BotNFT, BotTier } from "@/types";
 interface BotCardProps {
   bot: BotNFT;
   onListForSale?: (botId: bigint) => void;
+  /** Opens the "Send" flow — a direct bot_nft `transfer` to another address (#1415). */
+  onSend?: (botId: bigint) => void;
 }
 
 /**
@@ -42,12 +44,19 @@ function formatDate(timestamp: number): string {
   });
 }
 
-export default function BotCard({ bot, onListForSale }: BotCardProps) {
+export default function BotCard({ bot, onListForSale, onSend }: BotCardProps) {
   const tierName = BOT_TIER_NAMES[bot.tier] ?? "Unknown";
   const tierColor = BOT_TIER_COLORS[bot.tier] ?? "text-muted";
   const tierBg = BOT_TIER_BG_COLORS[bot.tier] ?? "bg-muted/20";
   const TierIcon = TIER_ICON[bot.tier] ?? Circle;
   const tierBorder = TIER_BADGE_BORDER[bot.tier] ?? "border border-solid border-current/40";
+  const actionClass = clsx(
+    "flex min-h-11 flex-1 items-center justify-center gap-2",
+    "rounded-xl border border-liner bg-card-2 px-4 py-2.5",
+    "text-sm font-medium text-text",
+    "hover:bg-white/5 hover:border-white/10 transition-colors",
+    "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+  );
 
   return (
     <motion.div
@@ -118,22 +127,31 @@ export default function BotCard({ bot, onListForSale }: BotCardProps) {
         </div>
       </div>
 
-      {onListForSale && (
-        <button
-          type="button"
-          onClick={() => onListForSale(bot.id)}
-          aria-label={`List for Sale — ${bot.nickname || tierName} #${bot.id.toString()}`}
-          className={clsx(
-            "flex min-h-11 items-center justify-center gap-2",
-            "rounded-xl border border-liner bg-card-2 px-4 py-2.5",
-            "text-sm font-medium text-text",
-            "hover:bg-white/5 hover:border-white/10 transition-colors",
-            "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+      {(onListForSale || onSend) && (
+        <div className="flex gap-2">
+          {onListForSale && (
+            <button
+              type="button"
+              onClick={() => onListForSale(bot.id)}
+              aria-label={`List for Sale — ${bot.nickname || tierName} #${bot.id.toString()}`}
+              className={actionClass}
+            >
+              <Tag className="h-3.5 w-3.5" aria-hidden="true" />
+              List for Sale
+            </button>
           )}
-        >
-          <Tag className="h-3.5 w-3.5" aria-hidden="true" />
-          List for Sale
-        </button>
+          {onSend && (
+            <button
+              type="button"
+              onClick={() => onSend(bot.id)}
+              aria-label={`Send — ${bot.nickname || tierName} #${bot.id.toString()}`}
+              className={actionClass}
+            >
+              <Send className="h-3.5 w-3.5" aria-hidden="true" />
+              Send
+            </button>
+          )}
+        </div>
       )}
     </motion.div>
   );

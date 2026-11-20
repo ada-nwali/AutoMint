@@ -3,6 +3,7 @@ import { Sora, Inter } from "next/font/google";
 import Providers from "./providers";
 import Header from "@/components/layout/Header";
 import Footer from "@/components/layout/Footer";
+import PauseBanner from "@/components/layout/PauseBanner";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 import "./globals.css";
 
@@ -40,6 +41,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               Skip to main content
             </a>
             <Header />
+            <PauseBanner />
             <main id="main-content" className="flex-1" tabIndex={-1}>
               {children}
             </main>

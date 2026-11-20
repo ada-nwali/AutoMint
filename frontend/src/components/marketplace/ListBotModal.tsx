@@ -6,11 +6,13 @@ import { toast } from "sonner";
 import {
   useListBot,
   useMarketplaceConfig,
+  useMinListingPrice,
   useTokenDecimals,
   useTokenSymbol,
 } from "@/hooks/useMarketplace";
 import { toBaseUnits, fromBaseUnits } from "@/lib/format";
 import { CONTRACT_ADDRESSES } from "@/lib/constants";
+import { usePauseStatus } from "@/hooks/usePauseStatus";
 import type { BotNFT } from "@/types";
 import clsx from "clsx";
 
@@ -50,6 +52,16 @@ export default function ListBotModal({ bot, isOpen, onClose }: ListBotModalProps
   const currency = CONTRACT_ADDRESSES.token;
   const { data: tokenDecimals = 7 } = useTokenDecimals(currency);
   const { data: tokenSymbol = "AMT" } = useTokenSymbol(currency);
+  // list_bot rejects prices below get_min_price(currency) with PriceTooLow
+  // (#1417); check it here so the user is never asked to sign a doomed tx.
+  const { data: minPrice } = useMinListingPrice(currency);
+  const minPriceDisplay =
+    minPrice !== undefined
+      ? fromBaseUnits(minPrice, tokenDecimals).toLocaleString("en-US", {
+          maximumFractionDigits: tokenDecimals,
+        })
+      : null;
+  const { listPaused } = usePauseStatus();
 
   // Validate decimal precision, minimum and maximum.
   const validation = useMemo(() => {
@@ -105,8 +117,16 @@ export default function ListBotModal({ bot, isOpen, onClose }: ListBotModalProps
       };
     }
 
+    if (minPrice !== undefined && baseUnits < minPrice) {
+      return {
+        isValid: false,
+        error: `Price must be at least ${minPriceDisplay} ${tokenSymbol} (marketplace minimum).`,
+        reason: `Minimum listing price is ${minPriceDisplay} ${tokenSymbol}.`,
+      };
+    }
+
     return { isValid: true, error: null, reason: null, baseUnits, num };
-  }, [priceInput, tokenDecimals, tokenSymbol]);
+  }, [priceInput, tokenDecimals, tokenSymbol, minPrice, minPriceDisplay]);
 
   // Live fee breakdown in exact base units, mirroring `buy_bot` on-chain:
   // platform fee = price * fee_bps / 10_000, creator royalty = price *
@@ -142,7 +162,7 @@ export default function ListBotModal({ bot, isOpen, onClose }: ListBotModalProps
     e.preventDefault();
     setTouched(true);
 
-    if (!validation.isValid || !validation.baseUnits) return;
+    if (!validation.isValid || !validation.baseUnits || listPaused) return;
 
     listBot.mutate(
       { botId: bot.id, price: validation.baseUnits },
@@ -215,7 +235,8 @@ export default function ListBotModal({ bot, isOpen, onClose }: ListBotModalProps
           </div>
 
           <p id={`${priceInputId}-help`} className="text-xs text-muted">
-            Enter price in {tokenSymbol} (min {tokenDecimals} decimal places precision).
+            Enter price in {tokenSymbol} (up to {tokenDecimals} decimal places).
+            {minPriceDisplay !== null && ` Minimum: ${minPriceDisplay} ${tokenSymbol}.`}
           </p>
 
           {touched && validation.error && (
@@ -270,9 +291,11 @@ export default function ListBotModal({ bot, isOpen, onClose }: ListBotModalProps
         <div className="flex flex-col gap-2">
           <button
             type="submit"
-            disabled={!validation.isValid || listBot.isPending}
+            disabled={!validation.isValid || listBot.isPending || listPaused}
             aria-busy={listBot.isPending}
-            aria-describedby={!validation.isValid ? `${priceInputId}-disabled-reason` : undefined}
+            aria-describedby={
+              !validation.isValid || listPaused ? `${priceInputId}-disabled-reason` : undefined
+            }
             className={clsx(
               "btn-primary w-full py-3 text-base font-semibold transition-all",
               "disabled:cursor-not-allowed disabled:opacity-50",
@@ -281,14 +304,25 @@ export default function ListBotModal({ bot, isOpen, onClose }: ListBotModalProps
             {listBot.isPending ? "Listing Bot…" : "List for Sale"}
           </button>
 
-          {!validation.isValid && validation.reason && (
+          {listPaused ? (
             <p
               id={`${priceInputId}-disabled-reason`}
               role="status"
-              className="text-center text-xs text-muted"
+              className="text-center text-xs text-amber-400"
             >
-              {validation.reason}
+              Listing is unavailable while the marketplace is paused.
             </p>
+          ) : (
+            !validation.isValid &&
+            validation.reason && (
+              <p
+                id={`${priceInputId}-disabled-reason`}
+                role="status"
+                className="text-center text-xs text-muted"
+              >
+                {validation.reason}
+              </p>
+            )
           )}
         </div>
       </form>

@@ -9,15 +9,22 @@ interface ClaimButtonProps {
   pendingPoints: number | bigint;
   onClaim: () => void;
   isClaiming: boolean;
+  /** True while the AMT token is paused — `claim` mints AMT and would fail (#1416). */
+  isPaused?: boolean;
 }
 
-export default function ClaimButton({ pendingPoints, onClaim, isClaiming }: ClaimButtonProps) {
+export default function ClaimButton({
+  pendingPoints,
+  onClaim,
+  isClaiming,
+  isPaused: claimPaused = false,
+}: ClaimButtonProps) {
   const points = typeof pendingPoints === "bigint" ? Number(pendingPoints) : pendingPoints;
   // Claiming is a mutation: it stays disabled while Freighter is on the
   // wrong network (#455). The runtime guard in executeTransaction is the
   // backstop; this is the user-visible half.
   const networkMismatch = useWalletStore(selectNetworkMismatch);
-  const disabled = isClaiming || points <= 0 || networkMismatch;
+  const disabled = isClaiming || points <= 0 || networkMismatch || claimPaused;
 
   return (
     <motion.div
@@ -48,7 +55,9 @@ export default function ClaimButton({ pendingPoints, onClaim, isClaiming }: Clai
         title={
           networkMismatch && !isClaiming
             ? "Freighter is on the wrong network — switch to Testnet to claim"
-            : undefined
+            : claimPaused
+              ? "Claiming is unavailable while the AMT token is paused"
+              : undefined
         }
         className={clsx(
           "flex min-h-11 items-center justify-center gap-2 rounded-xl border px-4 py-2.5 text-sm font-medium transition-all",
@@ -62,6 +71,11 @@ export default function ClaimButton({ pendingPoints, onClaim, isClaiming }: Clai
           <>
             <Coins className="h-4 w-4" aria-hidden="true" />
             Switch Network to Claim
+          </>
+        ) : claimPaused && !isClaiming ? (
+          <>
+            <Coins className="h-4 w-4" aria-hidden="true" />
+            Claiming Paused
           </>
         ) : isClaiming ? (
           <>

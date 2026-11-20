@@ -104,4 +104,10 @@ export const qk = {
   ],
   marketStats: (): QueryKey => ["marketStats"],
   marketplaceConfig: (): QueryKey => ["marketplaceConfig"],
+  /** Marketplace `is_paused` + token `paused`, polled for the site banner (#1416). */
+  pauseStatus: (): QueryKey => ["pauseStatus"],
+  /** Marketplace `get_min_price(currency)` (#1417). */
+  minListingPrice: (currency: string): QueryKey => ["minListingPrice", currency],
+  /** bot_nft `tier_remaining(tier)` (#1418). */
+  tierRemaining: (tier: string): QueryKey => ["tierRemaining", tier],
 } as const;

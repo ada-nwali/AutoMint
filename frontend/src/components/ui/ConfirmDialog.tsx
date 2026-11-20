@@ -1,9 +1,5 @@
 "use client";
 
-import { useEffect, useId, useRef, useCallback } from "react";
-import { createPortal } from "react-dom";
-import { motion, AnimatePresence } from "framer-motion";
-import { X } from "lucide-react";
 import Modal from "./Modal";
 import clsx from "clsx";
 
@@ -15,8 +11,17 @@ interface ConfirmDialogProps {
   confirmText?: string;
   cancelText?: string;
   onConfirm: () => void;
+  /** Disables the confirm button, e.g. while the confirmed action is in flight. */
+  confirmDisabled?: boolean;
+  /** Optional extra content rendered between the description and the buttons. */
+  children?: React.ReactNode;
 }
 
+/**
+ * A confirm/cancel prompt built on {@link Modal}, which owns the portal,
+ * focus lock, Escape handling and the useId()-based title/description ids
+ * (#1370).
+ */
 function ConfirmDialog({
   isOpen,
   onClose,
@@ -25,171 +30,34 @@ function ConfirmDialog({
   confirmText = "Confirm",
   cancelText = "Cancel",
   onConfirm,
+  confirmDisabled = false,
+  children,
 }: ConfirmDialogProps) {
-  const overlayRef = useRef<HTMLDivElement>(null);
-  const contentRef = useRef<HTMLDivElement>(null);
-  const previousFocusRef = useRef<HTMLElement | null>(null);
-  // useId() prevents id collisions when multiple ConfirmDialogs render (#1370).
-  const uid = useId();
-  const titleId = `${uid}-title`;
-  const descId = description ? `${uid}-description` : undefined;
-
-  useRef<HTMLDivElement>(null); // suppress unused
-
-  const trapFocus = useCallback((e: KeyboardEvent) => {
-    if (e.key !== "Tab" || !contentRef.current) return;
-    const focusable = contentRef.current.querySelectorAll<HTMLElement>(FOCUSABLE);
-    if (focusable.length === 0) return;
-
-    const first = focusable[0]!;
-    const last = focusable[focusable.length - 1]!;
-
-    if (e.shiftKey) {
-      if (document.activeElement === first) {
-        e.preventDefault();
-        last.focus();
-      }
-    } else {
-      if (document.activeElement === last) {
-        e.preventDefault();
-        first.focus();
-      }
-    }
-  }, []);
-
-  useEffect(() => {
-    if (!isOpen) return;
-
-    previousFocusRef.current = document.activeElement as HTMLElement;
-    document.body.style.overflow = "hidden";
-
-    const timer = requestAnimationFrame(() => {
-      if (contentRef.current) {
-        const firstFocusable = contentRef.current.querySelector<HTMLElement>(FOCUSABLE);
-        firstFocusable?.focus();
-      }
-    });
-
-    const handleKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-      trapFocus(e);
-    };
-
-    document.addEventListener("keydown", handleKey);
-
-    return () => {
-      cancelAnimationFrame(timer);
-      document.removeEventListener("keydown", handleKey);
-      document.body.style.overflow = "";
-      previousFocusRef.current?.focus();
-    };
-  }, [isOpen, onClose, trapFocus]);
-
-  const handleOverlayClick = (e: React.MouseEvent) => {
-    if (e.target === overlayRef.current) onClose();
-  };
-
-  return createPortal(
-    <AnimatePresence>
-      {isOpen && (
-        <motion.div
-          ref={overlayRef}
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          transition={{ duration: 0.2 }}
-          onClick={handleOverlayClick}
-          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
-        >
-          <motion.div
-            ref={contentRef}
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby={titleId}
-            aria-describedby={descId}
-            initial={{ opacity: 0, scale: 0.95, y: 8 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.95, y: 8 }}
-            transition={{ duration: 0.2 }}
-            className={clsx(
-              "relative w-full max-w-md rounded-2xl border border-liner bg-card p-6 shadow-2xl",
-              "max-h-[85vh] overflow-y-auto",
-              "mx-auto my-auto",
-            )}
-          >
-            <div className="flex items-start justify-between gap-4 mb-4">
-              <div className="min-w-0 flex-1">
-                {title && (
-                  <h2 id={titleId} className="font-display text-lg font-bold text-text">
-                    {title}
-                  </h2>
-                )}
-                {description && (
-                  <p id={descId} className="mt-1 text-sm text-muted">
-                    {description}
-                  </p>
-                )}
-              </div>
-              <button
-                onClick={onClose}
-                className="shrink-0 rounded-lg p-1.5 text-muted hover:text-text hover:bg-card-2 transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-                aria-label="Close modal"
-              >
-                <X className="h-4 w-4" aria-hidden="true" />
-              </button>
-            </div>
-
-            <div className="flex gap-3 mt-6">
-              <button
-                onClick={onConfirm}
-                className={clsx(
-                  "flex-1 rounded-lg px-4 py-2 text-semibold transition-colors",
-                  "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
-                  "bg-gold/10 text-gold border-gold/30 hover:bg-gold/20 hover:border-gold/50",
-                )}
-                disabled={false}
-              >
-                {confirmText}
-              </button>
-              <button
-                onClick={onClose}
-                className={clsx(
-                  "flex-1 rounded-lg px-4 py-2 text-semibold transition-colors",
-                  "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
-                  "text-muted hover:text-text hover:bg-card-2",
-                )}
-                disabled={false}
-              >
-                {cancelText}
-              </button>
-            </div>
-          </motion.div>
-        </motion.div>
-      )}
-    </AnimatePresence>,
-    document.body,
   return (
     <Modal isOpen={isOpen} onClose={onClose} title={title} description={description}>
+      {children}
       <div className="flex gap-3 mt-6">
         <button
+          type="button"
           onClick={onConfirm}
           className={clsx(
-            "flex-1 rounded-lg px-4 py-2 text-semibold transition-colors",
+            "flex-1 rounded-lg border px-4 py-2 font-semibold transition-colors",
             "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
-            "bg-gold/10 text-gold border-gold/30 hover:bg-gold/20 hover:border-gold/50"
+            "bg-gold/10 text-gold border-gold/30 hover:bg-gold/20 hover:border-gold/50",
+            "disabled:cursor-not-allowed disabled:opacity-50",
           )}
-          disabled={false}
+          disabled={confirmDisabled}
         >
           {confirmText}
         </button>
         <button
+          type="button"
           onClick={onClose}
           className={clsx(
-            "flex-1 rounded-lg px-4 py-2 text-semibold transition-colors",
+            "flex-1 rounded-lg px-4 py-2 font-semibold transition-colors",
             "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
-            "text-muted hover:text-text hover:bg-card-2"
+            "text-muted hover:text-text hover:bg-card-2",
           )}
-          disabled={false}
         >
           {cancelText}
         </button>

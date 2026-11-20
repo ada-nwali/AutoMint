@@ -34,6 +34,12 @@ export default function UpgradePrompt({ currentRate: _currentRate }: UpgradeProm
             {diamondMultiplier !== null &&
               ` Diamond bots earn ${diamondMultiplier}x the rate of Basic bots!`}
           </p>
+          <a
+            href="#tier-shop"
+            className="mt-2 inline-block text-xs font-medium text-gold hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+          >
+            Buy a tier bot
+          </a>
         </div>
 
         <Link

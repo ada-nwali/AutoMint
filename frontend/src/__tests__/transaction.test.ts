@@ -364,7 +364,8 @@ describe("transaction pipeline", () => {
     expect(invocation.functionName().toString()).toBe("list_bot");
     expect(
       invocation.args().map((arg: { switch(): { name: string } }) => arg.switch().name),
-    ).toEqual(["scvAddress", "scvU64", "scvI128", "scvAddress"]);
+      // list_bot(seller, bot_id, price, currency, duration_secs)
+    ).toEqual(["scvAddress", "scvU64", "scvI128", "scvAddress", "scvU64"]);
 
     // Assemble step: the simulation result is folded into the built
     // transaction, and the wallet is asked to sign the *assembled* result —

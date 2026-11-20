@@ -7,13 +7,14 @@ import {
   buildListBotArgs,
   getTokenDecimals,
   getTokenSymbol,
+  getMinListingPrice,
+  getTierRemaining,
+  buildMintTierArgs,
+  buildTransferBotArgs,
 } from "@/lib/contracts";
 import { runTxWithToasts } from "@/lib/transaction";
 import { useWalletStore, selectPublicKey } from "@/store/walletStore";
-import { nativeToScVal, xdr } from "@stellar/stellar-sdk";
 import type { BotTier, MarketplaceListing } from "@/types";
-import type { Tier, MarketplaceListing } from "@/types";
-import { TIER_ORDER } from "@/types";
 import { pollWhenVisible } from "@/lib/polling";
 import { STALE_TIME, GC_TIME, qk } from "@/lib/queryKeys";
 import { trackStatus, newTxId } from "@/components/ui/TxStatus";
@@ -89,32 +90,124 @@ export function useMintTierBot() {
   const publicKey = useWalletStore(selectPublicKey);
 
   return useMutation({
-    // mint_tier(owner: Address, tier: Tier) — on-chain Tier is Basic|Advanced|Premium
-    // encoded as u32 (0=Basic, 1=Bronze, 2=Silver, 3=Gold, 4=Diamond).
-    mutationFn: async ({ tier }: { tier: Tier }) => {
+    // mint_tier(owner: Address, tier: BotTier) — BotTier is a repr(u32) enum
+    // (0=Basic, 1=Bronze, 2=Silver, 3=Gold, 4=Diamond). The contract pulls
+    // the tier price from `owner` in its configured payment token.
+    mutationFn: async ({ tier }: { tier: BotTier }) => {
       if (!publicKey) throw new Error("Wallet not connected");
 
-      const tierIndex = TIER_ORDER.indexOf(tier);
-      if (tierIndex === -1) throw new Error(`Unknown tier: ${tier}`);
-
-      return runTxWithToasts({
+      const txId = newTxId("mint_tier");
+      const status = await runTxWithToasts({
         contractId: CONTRACT_ADDRESSES.botNft,
         method: "mint_tier",
-        args: [nativeToScVal(publicKey, { type: "address" }), xdr.ScVal.scvU32(tierIndex)],
+        args: buildMintTierArgs(publicKey, tier),
         sourceAddress: publicKey,
         id: "mint_tier",
         label: "mint",
         successMessage: "Tier bot minted successfully!",
       });
+      trackStatus(txId, "Mint", status);
+      return status;
     },
-    onSuccess: () => {
+    onSuccess: (_status, { tier }) => {
       queryClient.invalidateQueries({ queryKey: qk.bots(publicKey) });
       queryClient.invalidateQueries({ queryKey: ["botDetails"] });
       queryClient.invalidateQueries({ queryKey: qk.accrualState(publicKey) });
+      queryClient.invalidateQueries({ queryKey: qk.amtBalance(publicKey) });
+      queryClient.invalidateQueries({ queryKey: qk.tierRemaining(tier) });
     },
     onError: (error: Error) => {
       toastContractError(error, "botNft");
       console.error("Bot mint failed:", error);
+    },
+  });
+}
+
+/**
+ * Remaining mint slots for `tier` (bot_nft `tier_remaining`). `TIER_UNCAPPED`
+ * (u64::MAX) means the tier has no cap.
+ */
+export function useTierRemaining(tier: BotTier) {
+  return useQuery<bigint>({
+    queryKey: qk.tierRemaining(tier),
+    queryFn: () => getTierRemaining(tier),
+    refetchInterval: pollWhenVisible(),
+    staleTime: STALE_TIME.SHORT,
+    gcTime: GC_TIME.STANDARD,
+  });
+}
+
+/**
+ * The marketplace's minimum listing price for `currency` (#1417). `list_bot`
+ * rejects anything lower with `PriceTooLow`, so the form validates against
+ * this before asking for a signature. Admin-configurable, so it is not
+ * cached for the whole session.
+ */
+export function useMinListingPrice(currency: string | undefined) {
+  return useQuery<bigint>({
+    queryKey: qk.minListingPrice(currency ?? ""),
+    queryFn: () => getMinListingPrice(currency!),
+    enabled: Boolean(currency),
+    staleTime: STALE_TIME.STANDARD,
+    gcTime: GC_TIME.LONG,
+  });
+}
+
+/**
+ * Send a bot to another address via bot_nft `transfer(bot_id, from, to)`
+ * (#1415) — no listing, no marketplace fee.
+ */
+export function useTransferBot() {
+  const queryClient = useQueryClient();
+  const publicKey = useWalletStore(selectPublicKey);
+
+  return useMutation({
+    mutationFn: async ({ botId, to }: { botId: bigint; to: string }) => {
+      if (!publicKey) throw new Error("Wallet not connected");
+
+      const txId = newTxId("transfer_bot");
+      const status = await runTxWithToasts({
+        contractId: CONTRACT_ADDRESSES.botNft,
+        method: "transfer",
+        args: buildTransferBotArgs(botId, publicKey, to),
+        sourceAddress: publicKey,
+        id: "transfer_bot",
+        label: "transfer",
+        successMessage: "Bot sent successfully!",
+      });
+      trackStatus(txId, "Transfer", status);
+      return status;
+    },
+    onMutate: async ({ botId }: { botId: bigint; to: string }) => {
+      // Optimistic update (#462): the bot leaves the owned list immediately.
+      await queryClient.cancelQueries({ queryKey: qk.bots(publicKey) });
+      await queryClient.cancelQueries({ queryKey: qk.dashboard(publicKey) });
+      const previousBots = queryClient.getQueryData(qk.bots(publicKey));
+      const previousDashboard = queryClient.getQueryData(qk.dashboard(publicKey));
+      queryClient.setQueryData(qk.bots(publicKey), (old: bigint[] | undefined) =>
+        old ? old.filter((id) => id !== botId) : old,
+      );
+      queryClient.setQueryData(qk.dashboard(publicKey), (old: DashboardData | undefined) =>
+        old ? { ...old, bots: old.bots.filter((id) => id !== botId) } : old,
+      );
+      return { previousBots, previousDashboard };
+    },
+    onError: (
+      error: Error,
+      _variables: { botId: bigint; to: string },
+      context: { previousBots: unknown; previousDashboard: unknown } | undefined,
+    ) => {
+      if (context) {
+        queryClient.setQueryData(qk.bots(publicKey), context.previousBots);
+        queryClient.setQueryData(qk.dashboard(publicKey), context.previousDashboard);
+      }
+      toastContractError(error, "botNft");
+      console.error("Bot transfer failed:", error);
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: qk.bots(publicKey) });
+      queryClient.invalidateQueries({ queryKey: ["botDetails"] });
+      queryClient.invalidateQueries({ queryKey: qk.accrualState(publicKey) });
     },
   });
 }

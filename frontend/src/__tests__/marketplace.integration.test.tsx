@@ -70,6 +70,16 @@ jest.mock("@/hooks/useMarketplace", () => ({
   useBuyBot: () => ({ mutate: mockMarketplace.buyMutate, isPending: false }),
   useCancelListing: () => ({ mutate: mockMarketplace.cancelMutate, isPending: false }),
   useListBot: () => ({ mutate: jest.fn(), isPending: false }),
+  useMarketplaceConfig: () => ({ data: { admin: "", botNft: "", feeBps: 250, royaltyBps: 0 } }),
+  useTokenDecimals: () => ({ data: 7 }),
+  useTokenSymbol: () => ({ data: "XLM" }),
+  useMinListingPrice: () => ({ data: undefined }),
+  useTransferBot: () => ({ mutate: jest.fn(), isPending: false }),
+}));
+
+const mockPause = { buyPaused: false, listPaused: false };
+jest.mock("@/hooks/usePauseStatus", () => ({
+  usePauseStatus: () => mockPause,
 }));
 
 // ---------------------------------------------------------------------------

@@ -13,10 +13,12 @@ import {
 import { useAllBotDetails } from "@/hooks/useBotDetails";
 import { useBots } from "@/hooks/useAccrual";
 import { useProfiles } from "@/hooks/useProfiles";
+import { usePauseStatus } from "@/hooks/usePauseStatus";
 import BotListingCard from "@/components/marketplace/BotListingCard";
 import MarketStats from "@/components/marketplace/MarketStats";
 import BotCard from "@/components/dashboard/BotCard";
 import ListBotModal from "@/components/marketplace/ListBotModal";
+import SendBotModal from "@/components/dashboard/SendBotModal";
 import { CardSkeleton, BotCardSkeleton } from "@/components/ui/Skeleton";
 import { ErrorState } from "@/components/ui/ErrorState";
 import type { BotNFT, BotTier, MarketplaceListing } from "@/types";
@@ -64,6 +66,7 @@ export default function MarketplacePage() {
   const [priceFilter, setPriceFilter] = useState<PriceFilter>("any");
   const [sort, setSort] = useState<SortOrder>("recent");
   const [listedBot, setListedBot] = useState<BotNFT | null>(null);
+  const [sendingBot, setSendingBot] = useState<BotNFT | null>(null);
   const [buyingId, setBuyingId] = useState<bigint | null>(null);
   const [cancellingId, setCancellingId] = useState<bigint | null>(null);
 
@@ -118,6 +121,7 @@ export default function MarketplacePage() {
   const { data: sellerProfiles } = useProfiles(sellerAddresses);
 
   const buy = useBuyBot();
+  const { buyPaused } = usePauseStatus();
   const cancel = useCancelListing();
 
   const sourceListings = tab === "mine" ? myListings : allListings;
@@ -163,6 +167,11 @@ export default function MarketplacePage() {
   const handleListForSale = (botId: bigint) => {
     const bot = botMap.get(botId);
     if (bot) setListedBot(bot);
+  };
+
+  const handleSend = (botId: bigint) => {
+    const bot = botMap.get(botId);
+    if (bot) setSendingBot(bot);
   };
 
   const chipClass = (active: boolean) =>
@@ -294,6 +303,7 @@ export default function MarketplacePage() {
               onCancel={handleCancel}
               isBuying={buyingId === listing.id}
               isCancelling={cancellingId === listing.id}
+              isBuyPaused={buyPaused}
             />
           );
         })}
@@ -422,7 +432,12 @@ export default function MarketplacePage() {
               ) : (
                 <div data-testid="marketplace-owned-grid" className="mb-8 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
                   {unlistedOwnedBots.map((bot) => (
-                    <BotCard key={bot.id.toString()} bot={bot} onListForSale={handleListForSale} />
+                    <BotCard
+                      key={bot.id.toString()}
+                      bot={bot}
+                      onListForSale={handleListForSale}
+                      onSend={handleSend}
+                    />
                   ))}
                 </div>
               )}
@@ -471,6 +486,7 @@ export default function MarketplacePage() {
                         onCancel={handleCancel}
                         isBuying={buyingId === listing.id}
                         isCancelling={cancellingId === listing.id}
+                        isBuyPaused={buyPaused}
                       />
                     );
                   })}
@@ -484,6 +500,9 @@ export default function MarketplacePage() {
       {/* List-for-sale modal */}
       {listedBot && (
         <ListBotModal bot={listedBot} isOpen onClose={() => setListedBot(null)} />
+      )}
+      {sendingBot && (
+        <SendBotModal bot={sendingBot} isOpen onClose={() => setSendingBot(null)} />
       )}
     </main>
   );

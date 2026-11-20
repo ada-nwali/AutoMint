@@ -618,20 +618,108 @@ export async function getUserRank(
 }
 
 /**
+ * Encode a tier as the on-chain `BotTier`. The Rust enum is
+ * `#[contracttype] #[repr(u32)]` with explicit discriminants (Basic = 0 …
+ * Diamond = 4), so Soroban encodes it as a plain `ScU32`, not the
+ * `ScVec([ScSymbol])` shape used for unit enums without discriminants.
+ */
+export function tierToScVal(tier: BotTier): xdr.ScVal {
+  const index = TIER_ORDER.indexOf(tier);
+  if (index === -1) throw new Error(`Unknown tier: ${tier}`);
+  return xdr.ScVal.scvU32(index);
+}
+
+/**
+ * Argument list for bot_nft `mint_tier(owner: Address, tier: BotTier)`.
+ * The contract charges the tier price in its configured payment token, so
+ * no token argument is passed.
+ */
+export function buildMintTierArgs(owner: string, tier: BotTier): xdr.ScVal[] {
+  return [addressToScVal(owner), tierToScVal(tier)];
+}
+
+/**
  * Mint a bot of a specific BotTier (AM-004/AM-013).
  *
- * Calls `mint_tier` (not `mint` — no such method exists) and encodes `tier`
- * as the Soroban `BotTier` enum (`ScVec([ScSymbol(tier)])`, which is how
- * `contracttype` unit enums are XDR-encoded). The contract uses its configured
- * payment token and applies the selected tier's price.
+ * Calls `mint_tier` (not `mint` — no such method exists). The contract uses
+ * its configured payment token and applies the selected tier's price.
  */
 export async function mintTierBot(address: string, tier: BotTier): Promise<string> {
   return buildTxXdr(
     CONTRACT_ADDRESSES.botNft,
     "mint_tier",
-    [nativeToScVal(address, { type: "address" }), xdr.ScVal.scvVec([xdr.ScVal.scvSymbol(tier)])],
+    buildMintTierArgs(address, tier),
     address,
   );
+}
+
+/** u64::MAX — what bot_nft `tier_remaining` returns for an uncapped tier. */
+export const TIER_UNCAPPED = BigInt("18446744073709551615");
+
+/**
+ * Remaining mint slots for `tier` from bot_nft `tier_remaining`. Returns
+ * {@link TIER_UNCAPPED} when the tier has no cap.
+ */
+export async function getTierRemaining(tier: BotTier, sourceAddress?: string): Promise<bigint> {
+  const raw = await simulateContractCall<bigint>(
+    CONTRACT_ADDRESSES.botNft,
+    "tier_remaining",
+    [tierToScVal(tier)],
+    defaultSource(sourceAddress),
+  );
+  return toBigInt(raw, "tier_remaining");
+}
+
+/**
+ * Argument list for bot_nft `transfer(bot_id: u64, from: Address, to: Address)`.
+ * `from` must be the connected wallet — the contract requires its auth and
+ * rejects with `NotOwner` otherwise.
+ */
+export function buildTransferBotArgs(botId: bigint, from: string, to: string): xdr.ScVal[] {
+  return [u64ToScVal(botId), addressToScVal(from), addressToScVal(to)];
+}
+
+/** Marketplace `is_paused()`: list, buy, update_price and offers are rejected while true. */
+export async function isMarketplacePaused(sourceAddress?: string): Promise<boolean> {
+  const raw = await simulateContractCall<boolean>(
+    CONTRACT_ADDRESSES.marketplace,
+    "is_paused",
+    [],
+    defaultSource(sourceAddress),
+  );
+  return raw === true;
+}
+
+/**
+ * Token `paused()`: transfers, mints and burns are rejected while true, which
+ * blocks buying bots, paid tier mints and claiming AMT.
+ */
+export async function isTokenPaused(sourceAddress?: string): Promise<boolean> {
+  const raw = await simulateContractCall<boolean>(
+    CONTRACT_ADDRESSES.token,
+    "paused",
+    [],
+    defaultSource(sourceAddress),
+  );
+  return raw === true;
+}
+
+/**
+ * Marketplace `get_min_price(currency)` — the floor `list_bot` enforces with
+ * `PriceTooLow`. Either the admin-set value or the default
+ * `ceil(10_000 / fee_bps)` base units.
+ */
+export async function getMinListingPrice(
+  currency: string,
+  sourceAddress?: string,
+): Promise<bigint> {
+  const raw = await simulateContractCall<bigint>(
+    CONTRACT_ADDRESSES.marketplace,
+    "get_min_price",
+    [addressToScVal(currency)],
+    defaultSource(sourceAddress),
+  );
+  return toBigInt(raw, "min_price");
 }
 
 /**
