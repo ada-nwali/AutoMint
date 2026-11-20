@@ -55,6 +55,8 @@ export interface MarketplaceListing {
   currency: string;
   listed_at: bigint;
   active: boolean;
+  /** Ledger timestamp (seconds) after which `buy_bot` rejects the listing. */
+  expires_at?: bigint;
 }
 
 export type Listing = MarketplaceListing;

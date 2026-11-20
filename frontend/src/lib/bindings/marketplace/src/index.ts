@@ -256,7 +256,12 @@ export const Errors = {
    * `set_bot_nft`: at least one listing still escrows a bot in the current
    * bot NFT contract, so the address cannot change until they settle.
    */
-  34: {message:"ActiveListingsExist"}
+  34: {message:"ActiveListingsExist"},
+
+  /**
+   * `reclaim_expired`: the listing is active and has not expired yet (#1402).
+   */
+  35: {message:"ListingNotExpired"}
 }
 
 export interface Client {
