@@ -25,7 +25,7 @@ export default function Header() {
   // onClick was a rules-of-hooks violation that crashed on click.
   const { isCopied, handleCopy } = useCopyToClipboard(publicKey ?? "");
 
-  useFocusLock(mobileMenuRef, () => setMobileOpen(false));
+  useFocusLock(mobileMenuRef, mobileOpen, () => setMobileOpen(false));
 
   // Close mobile menu on route change
   useEffect(() => {

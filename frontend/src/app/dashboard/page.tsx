@@ -10,10 +10,10 @@ import {
   useClaim,
   useAmtBalance,
   useAmtDecimals,
+  usePendingPoints,
+  useUserTotalRate,
 } from "@/hooks/useAccrual";
 import { useAllBotDetails } from "@/hooks/useBotDetails";
-import { getPendingPoints, bumpUserBots } from "@/lib/contracts";
-import { useState, useEffect } from "react";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { PointsCounter } from "@/components/dashboard/PointsCounter";
 import ClaimButton from "@/components/dashboard/ClaimButton";
@@ -27,7 +27,7 @@ import type { BotNFT } from "@/types";
 
 
 export default function DashboardPage() {
-  const { publicKey, isConnected, connect, isConnecting } = useWallet();
+  const { isConnected, connect, isConnecting } = useWallet();
   const {
     data: isRegistered,
     isLoading: isCheckingRegistration,
@@ -59,7 +59,6 @@ export default function DashboardPage() {
   } = useBots();
 
   const {
-    data: accrualState,
     isError: isAccrualError,
     error: accrualError,
     refetch: refetchAccrual,
@@ -78,7 +77,15 @@ export default function DashboardPage() {
   const { data: amtDecimals } = useAmtDecimals();
   const claim = useClaim();
 
-  const [pendingPoints, setPendingPoints] = useState<bigint>(BigInt(0));
+  // #1374: pending points live in React Query, keyed on the public key, so a
+  // wallet switch can never apply the previous account's in-flight result,
+  // and the fetch shares the dashboard's poll cadence and retry policy.
+  const { data: pendingPointsData } = usePendingPoints(!!isRegistered);
+  const pendingPoints = pendingPointsData ?? BigInt(0);
+
+  // #1373: the authoritative on-chain total (`get_user_total_rate`), not a
+  // client-side sum over whichever bot details happen to be loaded.
+  const { data: userTotalRate } = useUserTotalRate();
 
   const isAnyError = isRegError || isProfileError || isBotsError || isAccrualError || isBotsDetailsError;
   const activeError = regError || profileError || botsError || accrualError || botsDetailsError;
@@ -101,38 +108,16 @@ export default function DashboardPage() {
     refetchBotsDetails();
   };
 
-  // Calculate total accrual rate from bots
-  const totalRate =
-    bots?.reduce(
-      (sum: number, bot: BotNFT) => sum + Number(bot.accrual_rate),
-      0,
-    ) || 0;
+  const totalRate = Number(userTotalRate ?? BigInt(0));
 
-  // Fetch pending points when connected
-  useEffect(() => {
-    if (publicKey && isRegistered) {
-      getPendingPoints(publicKey)
-        .then(setPendingPoints)
-        .catch(() => setPendingPoints(BigInt(0)));
-    }
-  }, [publicKey, isRegistered, accrualState]);
-
-  // Bump storage TTL for user's bots on dashboard load to prevent archival (#397)
-  useEffect(() => {
-    if (publicKey && botIds && botIds.length > 0) {
-      bumpUserBots(publicKey).catch(() => {
-        // Permissionless maintenance call; ignore simulation or network errors
-      });
-    }
-  }, [publicKey, botIds]);
+  // #1375: TTL upkeep (`bump_user_bots`, #397) is not done here. The call only
+  // built and simulated an unsigned transaction whose XDR was discarded, so it
+  // never extended any TTL while costing a getAccount plus a simulation per
+  // visit. Bot TTLs must be bumped by a signed submission (e.g. a keeper job).
 
   // Handle claim
   const handleClaim = () => {
-    claim.mutate(undefined, {
-      onSuccess: () => {
-        setPendingPoints(BigInt(0));
-      },
-    });
+    claim.mutate();
   };
 
   // Not connected state

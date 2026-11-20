@@ -81,6 +81,8 @@ export const qk = {
   ],
   accrualState: (address: string | null): QueryKey => ["accrualState", address],
   accrualConfig: (): QueryKey => ["accrualConfig"],
+  /** Unclaimed points from accrual `pending_points`, per address (#1374). */
+  pendingPoints: (address: string | null): QueryKey => ["pendingPoints", address],
   amtBalance: (address: string | null): QueryKey => ["amtBalance", address],
   amtDecimals: (): QueryKey => ["amtDecimals"],
   tokenDecimals: (contractId: string): QueryKey => ["tokenDecimals", contractId],

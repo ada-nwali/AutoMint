@@ -24,7 +24,7 @@ export default function Modal({ isOpen, onClose, title, description, children }:
   const titleId = title ? `${uid}-title` : undefined;
   const descId = description ? `${uid}-description` : undefined;
 
-  useFocusLock(contentRef, onClose);
+  useFocusLock(contentRef, isOpen, onClose);
 
   const handleOverlayClick = (e: React.MouseEvent) => {
     if (e.target === overlayRef.current) onClose();

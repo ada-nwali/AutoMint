@@ -10,6 +10,7 @@ import {
   getAmtBalance,
   getAmtDecimals,
   getUserTotalRate,
+  getPendingPoints,
 } from "@/lib/contracts";
 import { executeTransaction, runTxWithToasts, type TransactionStatus } from "@/lib/transaction";
 import { getLedgerCloseTime } from "@/lib/stellar";
@@ -399,6 +400,28 @@ export function useUserTotalRate() {
   });
 }
 
+/**
+ * Unclaimed points for the connected wallet, from accrual `pending_points`.
+ *
+ * Keyed on the public key (#1374): switching wallets while a request is in
+ * flight can no longer apply the previous account's result, and the query
+ * follows the shared poll cadence and retry policy like every other hook.
+ * Pass `enabled = false` until the wallet is known to be registered.
+ */
+export function usePendingPoints(enabled = true) {
+  const publicKey = useWalletStore(selectPublicKey);
+
+  return useQuery<bigint>({
+    queryKey: qk.pendingPoints(publicKey),
+    queryFn: () =>
+      publicKey ? getPendingPoints(publicKey) : Promise.resolve(BigInt(0)),
+    enabled: !!publicKey && enabled,
+    refetchInterval: pollWhenVisible(),
+    staleTime: STALE_TIME.REALTIME,
+    gcTime: GC_TIME.STANDARD,
+  });
+}
+
 export interface DashboardData {
   registered: boolean;
   profilePoints: bigint | null;
@@ -505,6 +528,8 @@ export function useClaim() {
     },
     onSuccess: () => {
       track("claim_success");
+      // A successful claim leaves nothing pending (#1374).
+      queryClient.setQueryData(qk.pendingPoints(publicKey), BigInt(0));
     },
     onError: (
       error: Error,
@@ -524,6 +549,7 @@ export function useClaim() {
       queryClient.invalidateQueries({ queryKey: qk.profile(publicKey) });
       queryClient.invalidateQueries({ queryKey: qk.profilePoints(publicKey) });
       queryClient.invalidateQueries({ queryKey: qk.accrualState(publicKey) });
+      queryClient.invalidateQueries({ queryKey: qk.pendingPoints(publicKey) });
       queryClient.invalidateQueries({ queryKey: qk.amtBalance(publicKey) });
       queryClient.invalidateQueries({ queryKey: ["leaderboard"] });
       queryClient.invalidateQueries({ queryKey: qk.rank(publicKey) });
