@@ -353,6 +353,8 @@ pub enum MarketplaceError {
     /// `set_bot_nft`: at least one listing still escrows a bot in the current
     /// bot NFT contract, so the address cannot change until they settle.
     ActiveListingsExist = 34,
+    /// `reclaim_expired`: the listing is active and has not expired yet (#1402).
+    ListingNotExpired = 35,
 }
 
 /// Every bot tier, in order, for per-tier reporting.
@@ -540,7 +542,11 @@ impl MarketplaceContract {
             .get::<_, u32>(&DataKey::UserActiveListingCount(seller.clone()))
             .unwrap_or(0);
 
-        if user_count >= listing_cap {
+        // Expired listings still sit in the stored count until reclaimed, so
+        // recount live ones before rejecting (#1404).
+        if user_count >= listing_cap
+            && Self::live_user_listing_count(&env, &seller) >= listing_cap
+        {
             Self::clear_lock(&env);
             return Err(MarketplaceError::TooManyListings);
         }
@@ -986,7 +992,7 @@ impl MarketplaceContract {
 
         if env.ledger().timestamp() <= listing.expires_at {
             Self::clear_lock(&env);
-            return Err(MarketplaceError::ListingNotActive); // not yet expired
+            return Err(MarketplaceError::ListingNotExpired);
         }
 
         let config: Config = match env.storage().instance().get(&DataKey::Config) {
@@ -1049,6 +1055,10 @@ impl MarketplaceContract {
 
         if !listing.active {
             return Err(MarketplaceError::ListingNotActive);
+        }
+
+        if Self::is_expired(&env, &listing) {
+            return Err(MarketplaceError::ListingExpired);
         }
 
         if new_price <= 0 {
@@ -1156,7 +1166,7 @@ impl MarketplaceContract {
                 .persistent()
                 .get::<_, Listing>(&DataKey::Listing(id))
             {
-                if l.active {
+                if l.active && !Self::is_expired(&env, &l) {
                     // Skip stale listings where the marketplace no longer owns
                     // the bot (e.g. admin transfer); see module docs.
                     if let Some(cfg) = config.as_ref() {
@@ -1248,7 +1258,7 @@ impl MarketplaceContract {
             else {
                 continue;
             };
-            if !listing.active {
+            if !listing.active || Self::is_expired(&env, &listing) {
                 continue;
             }
             if let Some(expected_tier) = tier {
@@ -1520,14 +1530,14 @@ impl MarketplaceContract {
 
     /// Sales statistics for one tier (all zeros before any activity).
     pub fn tier_stats(env: Env, tier: BotTier) -> TierStats {
-        Self::read_tier_stats(&env, tier)
+        Self::live_tier_stats(&env, tier)
     }
 
     /// Sales statistics for every tier, in tier order (Basic .. Diamond).
     pub fn market_stats(env: Env) -> Vec<TierStats> {
         let mut result: Vec<TierStats> = Vec::new(&env);
         for tier in ALL_TIERS {
-            result.push_back(Self::read_tier_stats(&env, tier));
+            result.push_back(Self::live_tier_stats(&env, tier));
         }
         result
     }
@@ -1572,10 +1582,7 @@ impl MarketplaceContract {
     /// marketplace. Bounded by `get_listing_cap`. Read-only; `0` when the
     /// seller has never listed or holds no active listings.
     pub fn get_user_active_listing_count(env: Env, seller: Address) -> u32 {
-        env.storage()
-            .persistent()
-            .get::<_, u32>(&DataKey::UserActiveListingCount(seller))
-            .unwrap_or(0)
+        Self::live_user_listing_count(&env, &seller)
     }
 
     /// The bot NFT contract this marketplace escrows and settles trades
@@ -2139,6 +2146,43 @@ impl MarketplaceContract {
             })
     }
 
+    /// `buy_bot` rejects a listing once the ledger time passes `expires_at`.
+    fn is_expired(env: &Env, listing: &Listing) -> bool {
+        env.ledger().timestamp() > listing.expires_at
+    }
+
+    /// Stored tier stats with the floor recomputed when the stored floor
+    /// listing has expired (or gone), so reads never show an unbuyable floor.
+    fn live_tier_stats(env: &Env, tier: BotTier) -> TierStats {
+        let mut stats = Self::read_tier_stats(env, tier);
+        if stats.floor_listing_id != 0 {
+            let floor_live = env
+                .storage()
+                .persistent()
+                .get::<_, Listing>(&DataKey::Listing(stats.floor_listing_id))
+                .map(|l| l.active && !Self::is_expired(env, &l))
+                .unwrap_or(false);
+            if !floor_live {
+                let (price, id) = Self::scan_floor(env, tier);
+                stats.floor_price = price;
+                stats.floor_listing_id = id;
+            }
+        }
+        stats
+    }
+
+    /// Active, unexpired listings `seller` holds, counted from their history.
+    fn live_user_listing_count(env: &Env, seller: &Address) -> u32 {
+        let count = Self::user_listing_count(env, seller);
+        let mut live: u32 = 0;
+        for l in Self::read_user_listings(env, seller, 0, count).iter() {
+            if l.active && !Self::is_expired(env, &l) {
+                live += 1;
+            }
+        }
+        live
+    }
+
     fn write_tier_stats(env: &Env, stats: &TierStats) {
         let key = DataKey::TierStats(stats.tier);
         env.storage().persistent().set(&key, stats);
@@ -2252,7 +2296,11 @@ impl MarketplaceContract {
                 .persistent()
                 .get::<_, Listing>(&DataKey::Listing(id))
             {
-                if l.active && l.bot_tier == tier && (best.0 == 0 || l.price < best.0) {
+                if l.active
+                    && !Self::is_expired(env, &l)
+                    && l.bot_tier == tier
+                    && (best.0 == 0 || l.price < best.0)
+                {
                     best = (l.price, l.id);
                 }
             }

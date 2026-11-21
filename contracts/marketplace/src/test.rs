@@ -3709,3 +3709,65 @@ mod escrow_exit_counts {
         assert_two_left(&h, &seller, l[0].0);
     }
 }
+
+// #1402-#1404: listing expiry in reclaim, update_price and read paths.
+mod listing_expiry {
+    use super::*;
+    use soroban_sdk::testutils::Ledger as _;
+
+    const PRICE: i128 = 50_0000000;
+
+    /// One escrowed listing; returns (seller, listing_id, expires_at).
+    fn one_listing(h: &Harness) -> (Address, u64, u64) {
+        h.env.mock_all_auths();
+        h.bot.set_marketplace(&h.mkt.address);
+        let seller = Address::generate(&h.env);
+        let bot_id = h.bot.mint_basic(&seller);
+        let id = h
+            .mkt
+            .list_bot(&seller, &bot_id, &PRICE, &h.token.address, &604_800_u64);
+        let expires_at = h.mkt.get_listing(&id).expires_at;
+        (seller, id, expires_at)
+    }
+
+    #[test]
+    fn reclaim_before_expiry_is_listing_not_expired() {
+        let h = setup();
+        let (_, id, _) = one_listing(&h);
+        assert_eq!(
+            h.mkt.try_reclaim_expired(&id),
+            Err(Ok(MarketplaceError::ListingNotExpired))
+        );
+    }
+
+    #[test]
+    fn update_price_rejects_expired_listing() {
+        let h = setup();
+        let (seller, id, expires_at) = one_listing(&h);
+        h.env.ledger().with_mut(|li| li.timestamp = expires_at + 1);
+        assert_eq!(
+            h.mkt.try_update_price(&seller, &id, &(PRICE * 2)),
+            Err(Ok(MarketplaceError::ListingExpired))
+        );
+    }
+
+    #[test]
+    fn expired_listing_drops_out_of_reads() {
+        let h = setup();
+        let (seller, id, expires_at) = one_listing(&h);
+        assert_eq!(h.mkt.get_active_listings(&0, &10).0.len(), 1);
+        assert_eq!(h.mkt.tier_stats(&MktBotTier::Basic).floor_listing_id, id);
+
+        h.env.ledger().with_mut(|li| li.timestamp = expires_at + 1);
+        assert_eq!(h.mkt.get_active_listings(&0, &10).0.len(), 0);
+        assert_eq!(
+            h.mkt
+                .get_listings_filtered(&None, &None, &None, &0, &10)
+                .0
+                .len(),
+            0
+        );
+        assert_eq!(h.mkt.tier_stats(&MktBotTier::Basic).floor_listing_id, 0);
+        assert_eq!(h.mkt.get_user_active_listing_count(&seller), 0);
+    }
+}

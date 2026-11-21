@@ -74,3 +74,31 @@ export function stroopsToXlmString(stroops: bigint): string {
   const fracStr = fracPart.toString().padStart(XLM_DECIMALS, "0").replace(/0+$/, "");
   return `${isNegative ? "-" : ""}${intPart.toString()}.${fracStr}`;
 }
+
+/**
+ * Whether a listing is past its `expires_at` ledger timestamp (seconds); the
+ * marketplace's `buy_bot` rejects it once `now > expires_at` (#1405).
+ * Listings without an expiry (`0n` / missing) never expire.
+ */
+export function isListingExpired(
+  listing: { expires_at?: bigint },
+  nowSecs: number = Math.floor(Date.now() / 1000),
+): boolean {
+  const expiresAt = listing.expires_at ?? 0n;
+  return expiresAt > 0n && BigInt(nowSecs) > expiresAt;
+}
+
+/** Short "time left" label for a listing expiry, e.g. "2d 3h", "45m". */
+export function formatTimeLeft(
+  expiresAt: bigint,
+  nowSecs: number = Math.floor(Date.now() / 1000),
+): string {
+  const left = Number(expiresAt) - nowSecs;
+  if (left <= 0) return "Expired";
+  const days = Math.floor(left / 86_400);
+  const hours = Math.floor((left % 86_400) / 3_600);
+  const minutes = Math.floor((left % 3_600) / 60);
+  if (days > 0) return `${days}d ${hours}h`;
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  return `${Math.max(minutes, 1)}m`;
+}

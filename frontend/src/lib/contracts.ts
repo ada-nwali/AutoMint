@@ -19,6 +19,7 @@ import type {
   TierInfo,
 } from "@/types";
 import { TIER_ORDER } from "@/types";
+import { isListingExpired } from "./format";
 
 // Generated bindings (AM-151): every contract call below is typed against the
 // Rust signatures via the stellar CLI output in `frontend/src/lib/bindings/`.
@@ -317,6 +318,8 @@ export function parseListing(rawData: Record<string, unknown>): MarketplaceListi
     currency: String(rawData.currency ?? ""),
     listed_at: toBigInt(rawData.listed_at, "listed_at"),
     active: Boolean(rawData.active),
+    expires_at:
+      rawData.expires_at == null ? undefined : toBigInt(rawData.expires_at, "expires_at"),
   };
 }
 
@@ -759,7 +762,9 @@ export async function getActiveListings(
       `get_active_listings returned unexpected type ${typeof listingsRaw}; expected array`,
     );
   }
-  return listingsRaw.map((listing) => parseListing(listing));
+  return listingsRaw
+    .map((listing) => parseListing(listing))
+    .filter((listing) => !isListingExpired(listing));
 }
 
 /**

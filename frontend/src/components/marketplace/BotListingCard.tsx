@@ -6,7 +6,7 @@ import { Bot, ShoppingCart, X, Zap, Tag } from "lucide-react";
 import clsx from "clsx";
 import { BotTier, BOT_TIER_NAMES, BOT_TIER_COLORS, BOT_TIER_BG_COLORS, TIER_META } from "@/types";
 import type { MarketplaceListing, BotNFT, UserProfile } from "@/types";
-import { fromBaseUnits } from "@/lib/format";
+import { fromBaseUnits, formatTimeLeft, isListingExpired } from "@/lib/format";
 import { useTokenDecimals, useTokenSymbol } from "@/hooks/useMarketplace";
 import ConfirmDialog from "@/components/ui/ConfirmDialog";
 
@@ -57,11 +57,11 @@ export default function BotListingCard({
   const { data: currencySymbol = "…" } = useTokenSymbol(listing.currency);
   const priceDisplay = fromBaseUnits(listing.price, currencyDecimals);
 
-  const buyDisabled = isBuying || !connectedAddress || buyPaused;
-
   const isOwner =
     connectedAddress !== null && listing.seller.toLowerCase() === connectedAddress.toLowerCase();
   const botLabel = `${bot?.nickname || tierName} Bot #${bot?.id?.toString() || listing.bot_id.toString()}`;
+  const expired = isListingExpired(listing);
+  const buyDisabled = isBuying || !connectedAddress || buyPaused || expired;
 
   const [isBuyingConfirmed, setIsBuyingConfirmed] = useState(false);
   const [isCancellingConfirmed, setIsCancellingConfirmed] = useState(false);
@@ -167,6 +167,19 @@ export default function BotListingCard({
         </span>
       </div>
 
+      {/* Expiry (#1405) — buy_bot rejects the listing once it has expired. */}
+      {listing.expires_at !== undefined && listing.expires_at > 0n && (
+        <div className="flex items-center justify-between gap-2 rounded-lg bg-card-2 px-3 py-2">
+          <span className="text-[10px] uppercase tracking-wider text-muted">Expires</span>
+          <span
+            className={clsx("text-xs", expired ? "text-pink" : "text-text")}
+            data-testid={`listing-expiry-${listing.id.toString()}`}
+          >
+            {expired ? "Expired" : `in ${formatTimeLeft(listing.expires_at)}`}
+          </span>
+        </div>
+      )}
+
       {/* Action button */}
       {isOwner ? (
         <>
@@ -217,20 +230,24 @@ export default function BotListingCard({
             disabled={buyDisabled}
             data-testid={`buy-btn-${listing.id.toString()}`}
             aria-label={
-              !connectedAddress
-                ? `Connect your wallet to buy ${botLabel}`
-                : buyPaused
-                  ? `Buying ${botLabel} is unavailable while trading is paused`
-                  : isBuying
-                    ? `Buying ${botLabel}`
-                    : `Buy ${botLabel} for ${priceDisplay.toLocaleString("en-US", { maximumFractionDigits: 2 })} ${currencySymbol}`
+              expired
+                ? `Listing for ${botLabel} has expired`
+                : !connectedAddress
+                  ? `Connect your wallet to buy ${botLabel}`
+                  : buyPaused
+                    ? `Buying ${botLabel} is unavailable while trading is paused`
+                    : isBuying
+                      ? `Buying ${botLabel}`
+                      : `Buy ${botLabel} for ${priceDisplay.toLocaleString("en-US", { maximumFractionDigits: 2 })} ${currencySymbol}`
             }
             title={
-              !connectedAddress
-                ? "Connect your wallet to buy"
-                : buyPaused
-                  ? "Buying is unavailable while trading is paused"
-                  : undefined
+              expired
+                ? "Listing has expired"
+                : !connectedAddress
+                  ? "Connect your wallet to buy"
+                  : buyPaused
+                    ? "Buying is unavailable while trading is paused"
+                    : undefined
             }
             className={clsx(
               "flex items-center justify-center gap-2 rounded-xl border px-4 py-2.5",
@@ -242,7 +259,7 @@ export default function BotListingCard({
             )}
           >
             <ShoppingCart className="h-4 w-4" aria-hidden="true" />
-            {isBuying ? "Buying..." : buyPaused ? "Paused" : "Buy"}
+            {expired ? "Expired" : isBuying ? "Buying..." : buyPaused ? "Paused" : "Buy"}
           </button>
         </>
       )}
