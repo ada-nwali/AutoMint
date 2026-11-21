@@ -577,7 +577,7 @@ impl BotNFTContract {
 
         // Enforce hard-coded per-tier supply cap (MAX_TIER_SUPPLY).
         let supply = Self::read_tier_supply(env, tier).saturating_add(1);
-        if supply > MAX_TIER_SUPPLY {
+        if tier != BotTier::Basic && supply > MAX_TIER_SUPPLY {
             return Err(BotNFTError::SupplyCapExceeded);
         }
 
@@ -929,6 +929,12 @@ impl BotNFTContract {
         Self::remove_bot_from_user(&env, &owner, bot_id);
         Self::remove_bot_from_tier_index(&env, bot.tier, bot_id);
         Self::decrement_bot_count(&env, &owner, bot_id);
+
+        env.storage()
+            .persistent()
+            .remove(&DataKey::Approval(bot_id));
+
+        Self::sync_rate(&env, &owner);
 
         env.storage()
             .instance()

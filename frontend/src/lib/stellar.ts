@@ -726,9 +726,10 @@ export async function submitTx(signedXdr: string): Promise<unknown> {
       // consumed, so the account cache is stale either way (#482).
       invalidateReadCaches();
       const diag =
-        (getRes as unknown as { resultXdr?: string; errorResultXdr?: string }).resultXdr ??
-        (getRes as unknown as { resultXdr?: string }).resultXdr;
-      throw new TxFailedError(`Transaction failed on-chain: ${diag ?? "unknown"}`, diag);
+        (getRes as unknown as { resultXdr?: unknown; errorResultXdr?: unknown }).resultXdr ??
+        (getRes as unknown as { errorResultXdr?: unknown }).errorResultXdr;
+      const reason = typeof diag === "string" && diag ? diag : "unknown";
+      throw new TxFailedError(`Transaction failed on-chain: ${reason}`, reason);
     }
 
     // Unknown status — treat as pending and back off.

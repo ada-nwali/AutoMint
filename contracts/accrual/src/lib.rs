@@ -131,6 +131,9 @@ pub enum AccrualError {
     BotNftCallFailed = 14,
     /// A forwarded admin-only token call failed at the token contract.
     TokenAdminCallFailed = 15,
+    /// An overlapping (reentrant) claim reached the entry while an earlier
+    /// claim was still in flight.
+    OverlappingClaim = 16,
 }
 
 /// Error code carried by a failed cross-contract call: `0` on success, the
@@ -753,8 +756,8 @@ impl AccrualContract {
     /// tokens are minted from `token_contract` (scaled by `amt_scale`, #410),
     /// and the sub-threshold carry is kept for the next claim.
     ///
-    /// Auth: `user.require_auth()`. A reentrant call returns `Ok(0)`
-    /// without minting.
+    /// Auth: `user.require_auth()`. An overlapping claim returns
+    /// `Err(AccrualError::OverlappingClaim)`.
     ///
     /// `token_contract` and `registry` are passed per call rather than read
     /// from storage for the token so a deployment can point claims at a
@@ -791,7 +794,7 @@ impl AccrualContract {
             .ok_or(AccrualError::NotInitialized)?;
 
         if env.storage().temporary().has(&DataKey::ReentrancyGuard) {
-            return Ok(0);
+            return Err(AccrualError::OverlappingClaim);
         }
         env.storage()
             .temporary()
