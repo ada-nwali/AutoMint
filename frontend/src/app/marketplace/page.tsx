@@ -16,15 +16,13 @@ type Tab = 'browse' | 'my-bots' | 'my-listings';
 
 export default function MarketplacePage() {
   const { isConnected, publicKey } = useWallet();
-  const { listings, myListings, loadingListings, isBuying, isCancelling, isMintingTier, buyBot, cancelListing, listBot, mintTierBot, isListing, refetch } =
-    useMarketplace(publicKey);
-  const { bots } = useAccrual(publicKey);
-
   const [activeTab, setActiveTab] = useState<Tab>('browse');
   const [listingBot, setListingBot] = useState<BotNFT | null>(null);
   const [tierFilter, setTierFilter] = useState<number | null>(null);
 
-  const filteredListings = tierFilter !== null ? listings.filter((l) => l.botTier === tierFilter) : listings;
+  const { listings, myListings, loadingListings, isBuying, isCancelling, isMintingTier, buyBot, cancelListing, listBot, mintTierBot, isListing, refetch } =
+    useMarketplace(publicKey, tierFilter);
+  const { bots } = useAccrual(publicKey);
 
   const TABS: { id: Tab; label: string }[] = [
     { id: 'browse', label: `Browse (${listings.length})` },
@@ -120,7 +118,7 @@ export default function MarketplacePage() {
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
               {Array.from({ length: 8 }).map((_, i) => <CardSkeleton key={i} />)}
             </div>
-          ) : filteredListings.length === 0 ? (
+          ) : listings.length === 0 ? (
             <div className="rounded-2xl p-16 text-center" style={{ background: 'var(--card)' }}>
               <Bot className="w-12 h-12 mx-auto mb-3" style={{ color: 'var(--muted)', opacity: 0.4 }} />
               <p style={{ color: 'var(--muted)' }}>No listings yet.</p>
@@ -129,7 +127,7 @@ export default function MarketplacePage() {
           ) : (
             <AnimatePresence mode="popLayout">
               <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
-                {filteredListings.map((listing) => (
+                {listings.map((listing) => (
                   <BotListingCard
                     key={String(listing.id)}
                     listing={listing}

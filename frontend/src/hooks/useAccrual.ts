@@ -4,20 +4,24 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
   getUserProfile,
-  getUserBots,
   getAccrualState,
-  getPendingPoints,
   claimPoints,
   isRegistered,
   registerUser,
   mintBasicBot,
   startAccrual,
   getAmtBalance,
+  getSecondsToNextAmt,
+  getUserBotsDetailed,
 } from '@/lib/contracts';
 import { COUNTER_TICK_MS, POLL_INTERVAL_MS } from '@/lib/constants';
 import type { BotNFT, UserProfile, AccrualState } from '@/types';
 
-interface UseAccrualReturn {
+export interface DashboardData {
+  bots: bigint[];
+}
+
+export interface UseAccrualReturn {
   profile: UserProfile | null;
   bots: BotNFT[];
   accrualState: AccrualState | null;
@@ -28,6 +32,7 @@ interface UseAccrualReturn {
   isClaiming: boolean;
   isRegistering: boolean;
   registered: boolean;
+  secondsToNextAmt: bigint | null;
   claim: () => Promise<void>;
   register: (username: string) => Promise<void>;
   refetch: () => void;
@@ -56,14 +61,14 @@ export function useAccrual(publicKey: string | null): UseAccrualReturn {
 
   const { data: bots = [], isLoading: loadingBots } = useQuery({
     queryKey: ['bots', publicKey],
-    queryFn: () => getUserBots(publicKey!, publicKey!),
+    queryFn: () => getUserBotsDetailed(publicKey!),
     enabled: !!publicKey && registered,
     refetchInterval: POLL_INTERVAL_MS,
   });
 
   const { data: accrualState = null } = useQuery({
     queryKey: ['accrualState', publicKey],
-    queryFn: () => getAccrualState(publicKey!, publicKey!),
+    queryFn: () => getAccrualState(publicKey!),
     enabled: !!publicKey && registered,
     refetchInterval: POLL_INTERVAL_MS,
   });
@@ -75,9 +80,19 @@ export function useAccrual(publicKey: string | null): UseAccrualReturn {
     refetchInterval: POLL_INTERVAL_MS,
   });
 
+  const { data: secondsToNextAmt = null } = useQuery({
+    queryKey: ['secondsToNextAmt', publicKey],
+    queryFn: () => getSecondsToNextAmt(publicKey!),
+    enabled: !!publicKey && registered,
+    refetchInterval: POLL_INTERVAL_MS,
+  });
+
   // ── Compute rate per hour ─────────────────────────────────────────────────
 
-  const ratePerHour = bots.reduce((sum, b) => sum + Number(b.accrualRate), 0);
+  const ratePerHour = bots.reduce(
+    (sum, b) => sum + Number(b.accrualRate ?? b.accrual_rate ?? 0n),
+    0
+  );
 
   // ── Animated points counter ───────────────────────────────────────────────
 
@@ -91,7 +106,7 @@ export function useAccrual(publicKey: string | null): UseAccrualReturn {
       return;
     }
 
-    const lastClaimTs = Number(accrualState.lastClaimTs);
+    const lastClaimTs = Number(accrualState.lastClaimTs ?? accrualState.last_claim_ts);
 
     animFrame.current = setInterval(() => {
       const nowSec = Math.floor(Date.now() / 1000);
@@ -172,6 +187,7 @@ export function useAccrual(publicKey: string | null): UseAccrualReturn {
     isClaiming,
     isRegistering,
     registered,
+    secondsToNextAmt,
     claim: async () => { await doClaim(); },
     register: async (username: string) => { await doRegister(username); },
     refetch,

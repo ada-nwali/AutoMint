@@ -9,10 +9,14 @@ interface PointsCounterProps {
   ratePerHour: number;
   bots: BotNFT[];
   amtBalance: bigint;
+  secondsToNextAmt?: bigint | null;
 }
 
-export function PointsCounter({ displayedPoints, ratePerHour, bots, amtBalance }: PointsCounterProps) {
+export function PointsCounter({ displayedPoints, ratePerHour, bots, amtBalance, secondsToNextAmt }: PointsCounterProps) {
   const ratePerSec = (ratePerHour / 3600).toFixed(4);
+  const countdown = secondsToNextAmt == null
+    ? null
+    : formatCountdown(Number(secondsToNextAmt));
 
   return (
     <div className="mf-card relative overflow-hidden" style={{ padding: '32px', background: 'var(--card)' }}>
@@ -47,6 +51,11 @@ export function PointsCounter({ displayedPoints, ratePerHour, bots, amtBalance }
         <p className="text-xs mt-2 font-mono" style={{ color: 'var(--muted)' }}>
           +{ratePerSec} pts/sec
         </p>
+        {countdown && (
+          <p className="text-xs mt-1" style={{ color: 'var(--gold)' }}>
+            Next AMT in {countdown}
+          </p>
+        )}
 
         {/* Stats row */}
         <div className="grid grid-cols-3 gap-3 mt-6">
@@ -81,6 +90,14 @@ export function PointsCounter({ displayedPoints, ratePerHour, bots, amtBalance }
       </div>
     </div>
   );
+}
+
+function formatCountdown(totalSeconds: number) {
+  if (!Number.isFinite(totalSeconds) || totalSeconds <= 0) return 'less than 1m';
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  return `${Math.max(1, minutes)}m`;
 }
 
 function StatBox({ label, value, color }: { label: string; value: string; color: string }) {

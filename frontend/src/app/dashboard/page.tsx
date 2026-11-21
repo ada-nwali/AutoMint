@@ -18,7 +18,7 @@ export default function DashboardPage() {
   const { isConnected, publicKey, connect, status } = useWallet();
   const {
     profile, bots, accrualState, amtBalance, displayedPoints, ratePerHour,
-    isLoading, isClaiming, isRegistering, registered, claim, register, refetch,
+    isLoading, isClaiming, isRegistering, registered, claim, register, refetch, secondsToNextAmt,
   } = useAccrual(publicKey);
 
   const { listBot, isListing } = useMarketplace(publicKey);
@@ -67,7 +67,7 @@ export default function DashboardPage() {
 
   // ── Dashboard (registered + unregistered both land here) ──────────────────
   const pendingPoints = accrualState
-    ? Math.max(0, Math.floor(((Date.now() / 1000 - Number(accrualState.lastClaimTs)) * ratePerHour) / 3600))
+    ? Math.max(0, Math.floor(((Date.now() / 1000 - Number(accrualState.lastClaimTs ?? accrualState.last_claim_ts)) * ratePerHour) / 3600))
     : 0;
 
   return (
@@ -176,6 +176,7 @@ export default function DashboardPage() {
             ratePerHour={registered ? ratePerHour : 0}
             bots={registered ? bots : []}
             amtBalance={registered ? amtBalance : 0n}
+            secondsToNextAmt={registered ? secondsToNextAmt : null}
           />
         </div>
         <ClaimButton

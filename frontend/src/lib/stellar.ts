@@ -122,8 +122,14 @@ interface InvokeOptions {
  * Simulate a read-only contract call and return the decoded result.
  */
 export async function simulateContractCall<T = unknown>(
-  opts: Omit<InvokeOptions, 'publicKey'> & { publicKey?: string }
+  contractAddressOrOpts: string | (Omit<InvokeOptions, 'publicKey'> & { publicKey?: string }),
+  method?: string,
+  args?: xdr.ScVal[],
+  publicKey?: string
 ): Promise<T> {
+  const opts = typeof contractAddressOrOpts === 'string'
+    ? { contractAddress: contractAddressOrOpts, method: method ?? '', args, publicKey }
+    : contractAddressOrOpts;
   const server = getServer();
   const contract = new Contract(opts.contractAddress);
   // Deployer exists on testnet and works as a caller for read-only simulations
@@ -147,6 +153,12 @@ export async function simulateContractCall<T = unknown>(
   }
 
   return scValToNative(simResult.result.retval) as T;
+}
+
+export async function rpcCall<T>(
+  callback: (server: SorobanRpc.Server) => Promise<T> | T
+): Promise<T> {
+  return callback(getServer());
 }
 
 /**

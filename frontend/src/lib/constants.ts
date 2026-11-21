@@ -20,7 +20,23 @@ export const CONTRACT_ADDRESSES = {
   ACCRUAL:     process.env.NEXT_PUBLIC_ACCRUAL_CONTRACT_ID     ?? '',
   MARKETPLACE: process.env.NEXT_PUBLIC_MARKETPLACE_CONTRACT_ID ?? '',
   TOKEN:       process.env.NEXT_PUBLIC_TOKEN_CONTRACT_ID       ?? '',
+  registry:    process.env.NEXT_PUBLIC_REGISTRY_CONTRACT_ID    ?? '',
+  botNft:      process.env.NEXT_PUBLIC_BOT_NFT_CONTRACT_ID     ?? '',
+  accrual:     process.env.NEXT_PUBLIC_ACCRUAL_CONTRACT_ID     ?? '',
+  marketplace: process.env.NEXT_PUBLIC_MARKETPLACE_CONTRACT_ID ?? '',
+  token:       process.env.NEXT_PUBLIC_TOKEN_CONTRACT_ID       ?? '',
 } as const;
+
+export const contractAddresses = CONTRACT_ADDRESSES;
+
+export const CONTRACTS = CONTRACT_ADDRESSES;
+export type ContractName =
+  | 'REGISTRY' | 'BOT_NFT' | 'ACCRUAL' | 'MARKETPLACE' | 'TOKEN'
+  | 'registry' | 'botNft' | 'accrual' | 'marketplace' | 'token';
+export const STELLAR_NETWORK_PASSPHRASE = NETWORK_PASSPHRASE;
+export const ANONYMOUS_READ_SOURCE =
+  process.env.NEXT_PUBLIC_SIMULATION_SOURCE ??
+  'GDQ6QUVINBCLB3ZCA5BHDBI6E7BNJGCIDWX7WPE2F7UYSGD7P5KBPM2F';
 
 export const TX_TIMEOUT = 30; // seconds
 

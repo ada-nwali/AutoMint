@@ -14,6 +14,20 @@ pub enum DataKey {
     NextListingId,
     Config,
     Initialized,
+    Purchases(Address),
+}
+
+#[derive(Clone, Debug)]
+#[contracttype]
+pub struct Purchase {
+    pub listing_id: u64,
+    pub bot_id: u64,
+    pub bot_tier: u32,
+    pub price: i128,
+    pub currency: Address,
+    pub seller: Address,
+    pub buyer: Address,
+    pub purchased_at: u64,
 }
 
 #[derive(Clone, Debug)]
@@ -179,6 +193,28 @@ impl MarketplaceContract {
         listing.active = false;
         env.storage().persistent().set(&DataKey::Listing(listing_id), &listing);
         Self::remove_active_listing(&env, listing_id);
+        let purchase = Purchase {
+            listing_id,
+            bot_id: listing.bot_id,
+            bot_tier: listing.bot_tier,
+            price: listing.price,
+            currency: listing.currency,
+            seller: listing.seller.clone(),
+            buyer: buyer.clone(),
+            purchased_at: env.ledger().timestamp(),
+        };
+        let mut purchases: Vec<Purchase> = env
+            .storage()
+            .persistent()
+            .get::<_, Vec<Purchase>>(&DataKey::Purchases(buyer.clone()))
+            .unwrap_or_else(|| Vec::new(&env));
+        purchases.push_back(purchase);
+        env.storage()
+            .persistent()
+            .set(&DataKey::Purchases(buyer.clone()), &purchases);
+        env.storage()
+            .persistent()
+            .extend_ttl(&DataKey::Purchases(buyer.clone()), LEDGER_THRESHOLD, LEDGER_BUMP);
         env.events().publish(
             (symbol_short!("sold"), listing.seller.clone(), buyer.clone()),
             (listing_id, listing.bot_id, listing.price),
@@ -259,6 +295,60 @@ impl MarketplaceContract {
         result
     }
 
+    pub fn get_listings_filtered(
+        env: Env,
+        tier: Option<u32>,
+        max_price: Option<i128>,
+        start: u32,
+        limit: u32,
+    ) -> Vec<Listing> {
+        let active_ids: Vec<u64> = env
+            .storage()
+            .instance()
+            .get(&DataKey::ActiveListings)
+            .unwrap_or_else(|| Vec::new(&env));
+        let mut result: Vec<Listing> = Vec::new(&env);
+        let mut skipped = 0u32;
+        for id in active_ids.iter() {
+            if result.len() >= limit { break; }
+            if let Some(listing) = env.storage().persistent().get::<_, Listing>(&DataKey::Listing(id)) {
+                if !listing.active { continue; }
+                if tier.is_some() && tier != Some(listing.bot_tier) { continue; }
+                if max_price.is_some() && listing.price > max_price.unwrap() { continue; }
+                if skipped < start {
+                    skipped += 1;
+                    continue;
+                }
+                result.push_back(listing);
+            }
+        }
+        result
+    }
+
+    pub fn get_user_purchases_page(
+        env: Env,
+        buyer: Address,
+        start: u32,
+        limit: u32,
+    ) -> Vec<Purchase> {
+        let purchases: Vec<Purchase> = env
+            .storage()
+            .persistent()
+            .get::<_, Vec<Purchase>>(&DataKey::Purchases(buyer))
+            .unwrap_or_else(|| Vec::new(&env));
+        let mut result: Vec<Purchase> = Vec::new(&env);
+        let mut skipped = 0u32;
+        for purchase in purchases.iter().rev() {
+            if result.len() >= limit { break; }
+            if skipped < start {
+                skipped += 1;
+                continue;
+            }
+            result.push_back(purchase);
+        }
+        result
+    }
+
     pub fn config(env: Env) -> Config {
         env.storage().instance().get(&DataKey::Config).unwrap()
     }
@@ -316,12 +406,12 @@ mod test {
         let env = Env::default();
         let (_, bot, tok, mkt) = setup(&env);
         let seller = Address::generate(&env);
-        let bot_id = bot.mint_basic(&seller).unwrap();
-        mkt.list_bot(&seller, &bot_id, &0u32, &50_0000000_i128, &tok.address).unwrap();
+        let bot_id = bot.mint_basic(&seller);
+        mkt.list_bot(&seller, &bot_id, &0u32, &50_0000000_i128, &tok.address);
         let listings = mkt.get_active_listings(&0u32, &10u32);
         assert_eq!(listings.len(), 1);
         assert_eq!(listings.get(0).unwrap().bot_id, bot_id);
-        mkt.cancel_listing(&seller, &1u64).unwrap();
+        mkt.cancel_listing(&seller, &1u64);
         assert_eq!(mkt.get_active_listings(&0u32, &10u32).len(), 0);
         assert_eq!(bot.get_user_bots(&seller).len(), 1);
     }
@@ -333,9 +423,9 @@ mod test {
         let seller = Address::generate(&env);
         let buyer = Address::generate(&env);
         tok.mint(&buyer, &1000_0000000_i128);
-        let bot_nft_id = bot.mint_basic(&seller).unwrap();
-        mkt.list_bot(&seller, &bot_nft_id, &0u32, &100_0000000_i128, &tok.address).unwrap();
-        mkt.buy_bot(&buyer, &1u64).unwrap();
+        let bot_nft_id = bot.mint_basic(&seller);
+        mkt.list_bot(&seller, &bot_nft_id, &0u32, &100_0000000_i128, &tok.address);
+        mkt.buy_bot(&buyer, &1u64);
         assert_eq!(bot.get_user_bots(&buyer).len(), 1);
         assert_eq!(bot.get_user_bots(&seller).len(), 0);
         // 2.5% fee goes to admin (fee_recipient)
@@ -349,8 +439,8 @@ mod test {
         let env = Env::default();
         let (_, bot, tok, mkt) = setup(&env);
         let seller = Address::generate(&env);
-        let bot_id = bot.mint_basic(&seller).unwrap();
-        mkt.list_bot(&seller, &bot_id, &0u32, &50_0000000_i128, &tok.address).unwrap();
+        let bot_id = bot.mint_basic(&seller);
+        mkt.list_bot(&seller, &bot_id, &0u32, &50_0000000_i128, &tok.address);
         assert!(mkt.try_buy_bot(&seller, &1u64).is_err());
     }
 
@@ -359,7 +449,7 @@ mod test {
         let env = Env::default();
         let (_, bot, tok, mkt) = setup(&env);
         let seller = Address::generate(&env);
-        let bot_id = bot.mint_basic(&seller).unwrap();
+        let bot_id = bot.mint_basic(&seller);
         assert!(mkt.try_list_bot(&seller, &bot_id, &0u32, &0_i128, &tok.address).is_err());
     }
 
@@ -376,10 +466,10 @@ mod test {
         let env = Env::default();
         let (_, bot, tok, mkt) = setup(&env);
         let seller = Address::generate(&env);
-        let id1 = bot.mint_basic(&seller).unwrap();
-        let id2 = bot.mint_tier(&seller, &automint_bot_nft::BotTier::Bronze).unwrap();
-        mkt.list_bot(&seller, &id1, &0u32, &10_0000000_i128, &tok.address).unwrap();
-        mkt.list_bot(&seller, &id2, &1u32, &20_0000000_i128, &tok.address).unwrap();
+        let id1 = bot.mint_basic(&seller);
+        let id2 = bot.mint_tier(&seller, &automint_bot_nft::BotTier::Bronze);
+        mkt.list_bot(&seller, &id1, &0u32, &10_0000000_i128, &tok.address);
+        mkt.list_bot(&seller, &id2, &1u32, &20_0000000_i128, &tok.address);
         assert_eq!(mkt.get_active_listings(&0u32, &10u32).len(), 2);
         assert_eq!(mkt.get_user_listings(&seller).len(), 2);
     }

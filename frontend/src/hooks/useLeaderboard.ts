@@ -13,7 +13,7 @@ export function useLeaderboard() {
 
   const { data: totalUsers = 0 } = useQuery<number>({
     queryKey: ['totalUsers'],
-    queryFn: getTotalUsers,
+    queryFn: () => getTotalUsers(),
     refetchInterval: POLL_INTERVAL_MS,
   });
 

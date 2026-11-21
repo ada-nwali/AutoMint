@@ -91,11 +91,13 @@ pub enum BotNFTError {
     NotOwner = 5,
     InvalidTier = 6,
     MaxBotsReached = 7,
+    InvalidName = 8,
 }
 
 const LEDGER_BUMP: u32 = 120960;
 const LEDGER_THRESHOLD: u32 = 103680;
 const MAX_BOTS_PER_USER: u32 = 50;
+pub const MAX_BOT_NAME_BYTES: u32 = 24;
 
 #[contract]
 pub struct BotNFTContract;
@@ -176,6 +178,38 @@ impl BotNFTContract {
             .persistent()
             .extend_ttl(&DataKey::Bot(bot_id), LEDGER_THRESHOLD, LEDGER_BUMP);
         env.events().publish((symbol_short!("transfer"), from, to), bot_id);
+        Ok(())
+    }
+
+    pub fn rename_bot(
+        env: Env,
+        owner: Address,
+        bot_id: u64,
+        name: String,
+    ) -> Result<(), BotNFTError> {
+        owner.require_auth();
+        let mut bot = env
+            .storage()
+            .persistent()
+            .get::<_, BotNFT>(&DataKey::Bot(bot_id))
+            .ok_or(BotNFTError::BotNotFound)?;
+        if bot.owner != owner {
+            return Err(BotNFTError::NotOwner);
+        }
+        if name.len() > MAX_BOT_NAME_BYTES {
+            return Err(BotNFTError::InvalidName);
+        }
+        bot.name = name;
+        env.storage()
+            .persistent()
+            .set(&DataKey::Bot(bot_id), &bot);
+        env.storage()
+            .persistent()
+            .extend_ttl(&DataKey::Bot(bot_id), LEDGER_THRESHOLD, LEDGER_BUMP);
+        env.events().publish(
+            (symbol_short!("rename"), owner),
+            bot_id,
+        );
         Ok(())
     }
 
@@ -271,8 +305,8 @@ mod test {
     fn test_mint_basic_bot() {
         let (env, _admin, client) = setup();
         let user = Address::generate(&env);
-        let bot_id = client.mint_basic(&user).unwrap();
-        let bot = client.get_bot(&bot_id).unwrap();
+        let bot_id = client.mint_basic(&user);
+        let bot = client.get_bot(&bot_id);
         assert_eq!(bot.tier, BotTier::Basic);
         assert_eq!(bot.accrual_rate, RATE_BASIC);
         assert_eq!(bot.owner, user);
@@ -289,8 +323,8 @@ mod test {
     fn test_mint_tier_and_rate() {
         let (env, _admin, client) = setup();
         let user = Address::generate(&env);
-        client.mint_basic(&user).unwrap();
-        client.mint_tier(&user, &BotTier::Gold).unwrap();
+        client.mint_basic(&user);
+        client.mint_tier(&user, &BotTier::Gold);
         assert_eq!(client.get_user_total_rate(&user), RATE_BASIC + RATE_GOLD);
     }
 
@@ -308,9 +342,9 @@ mod test {
         let (env, _admin, client) = setup();
         let alice = Address::generate(&env);
         let bob = Address::generate(&env);
-        let bot_id = client.mint_basic(&alice).unwrap();
-        client.transfer(&alice, &bob, &bot_id).unwrap();
-        let bot = client.get_bot(&bot_id).unwrap();
+        let bot_id = client.mint_basic(&alice);
+        client.transfer(&alice, &bob, &bot_id);
+        let bot = client.get_bot(&bot_id);
         assert_eq!(bot.owner, bob);
         assert_eq!(client.get_user_bots(&alice).len(), 0);
         assert_eq!(client.get_user_bots(&bob).len(), 1);
@@ -322,7 +356,7 @@ mod test {
         let alice = Address::generate(&env);
         let bob = Address::generate(&env);
         let charlie = Address::generate(&env);
-        let bot_id = client.mint_basic(&alice).unwrap();
+        let bot_id = client.mint_basic(&alice);
         // charlie tries to transfer alice's bot
         assert!(client.try_transfer(&charlie, &bob, &bot_id).is_err());
     }
@@ -337,9 +371,9 @@ mod test {
     fn test_multiple_bots_accumulate() {
         let (env, _admin, client) = setup();
         let user = Address::generate(&env);
-        client.mint_basic(&user).unwrap();
-        client.mint_tier(&user, &BotTier::Silver).unwrap();
-        client.mint_tier(&user, &BotTier::Diamond).unwrap();
+        client.mint_basic(&user);
+        client.mint_tier(&user, &BotTier::Silver);
+        client.mint_tier(&user, &BotTier::Diamond);
         assert_eq!(
             client.get_user_total_rate(&user),
             RATE_BASIC + RATE_SILVER + RATE_DIAMOND
