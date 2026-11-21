@@ -59,6 +59,19 @@ export interface MarketplaceListing {
   expires_at?: bigint;
 }
 
+export type MarketplaceOfferStatus = "Active" | "Accepted" | "Cancelled";
+
+export interface MarketplaceOffer {
+  id: bigint;
+  buyer: string;
+  bot_id: bigint;
+  amount: bigint;
+  currency: string;
+  created_at: bigint;
+  expires_at: bigint;
+  status: MarketplaceOfferStatus;
+}
+
 export type Listing = MarketplaceListing;
 
 export interface UserVault {

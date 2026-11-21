@@ -290,8 +290,12 @@ verify_contract() {  # <name>
     return 0
   fi
 
-  local admin_addr
-  admin_addr="$(stellar contract invoke --id "$id" --source "$IDENTITY" --network "$NETWORK" -- admin 2>/dev/null || true)"
+  local getter admin_addr
+  case "$name" in
+    registry|token|bot_nft|accrual|marketplace) getter="admin" ;;
+    *) log "WARNING: no admin getter configured for $name — skipping verification"; return 0 ;;
+  esac
+  admin_addr="$(stellar contract invoke --id "$id" --source "$IDENTITY" --network "$NETWORK" -- "$getter" 2>/dev/null || true)"
   if [[ -n "$admin_addr" ]]; then
     log "$name verified (admin: $admin_addr)"
   else

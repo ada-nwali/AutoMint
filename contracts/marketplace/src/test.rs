@@ -2801,6 +2801,9 @@ mod offers_and_fees {
         let open = h.mkt.get_offers_for_bot(&bot_id);
         assert_eq!(open.len(), 1);
         assert_eq!(open.get(0).unwrap().id, offer_id);
+        let buyer_offers = h.mkt.get_offers_for_buyer(&buyer);
+        assert_eq!(buyer_offers.len(), 1);
+        assert_eq!(buyer_offers.get(0).unwrap().id, offer_id);
         // Escrow is not fee revenue.
         assert_eq!(h.mkt.fees_accrued(&h.token.address), 0);
         assert_eq!(last_event_topic(&h), symbol_short!("offered"));
@@ -2963,6 +2966,7 @@ mod offers_and_fees {
         let offer = h.mkt.get_offer(&offer_id);
         assert_eq!(offer.status, OfferStatus::Accepted);
         assert_eq!(h.mkt.get_offers_for_bot(&bot_id).len(), 0);
+        assert_eq!(h.mkt.get_offers_for_buyer(&buyer).len(), 0);
         assert_eq!(h.mkt.get_user_purchases(&buyer, &10).len(), 1);
         assert_eq!(h.mkt.tier_stats(&MktBotTier::Basic).sale_count, 1);
         let events = h.env.events().all();
@@ -3141,6 +3145,7 @@ mod offers_and_fees {
         assert_eq!(h.token.balance(&h.mkt.address), 0);
         assert_eq!(h.mkt.get_offer(&offer_id).status, OfferStatus::Cancelled);
         assert_eq!(h.mkt.get_offers_for_bot(&bot_id).len(), 0);
+        assert_eq!(h.mkt.get_offers_for_buyer(&buyer).len(), 0);
         assert_eq!(last_event_topic(&h), symbol_short!("offer_cxl"));
         assert_eq!(
             h.mkt.try_cancel_offer(&buyer, &offer_id),

@@ -1038,6 +1038,16 @@ export interface Client {
   }) => Promise<AssembledTransaction<Array<Offer>>>
 
   /**
+   * Construct and simulate a get_offers_for_buyer transaction. Returns an
+   * `AssembledTransaction` whose result contains the buyer's open offers.
+   */
+  get_offers_for_buyer: ({buyer}: {buyer: string}, options?: {
+    fee?: number;
+    timeoutInSeconds?: number;
+    simulate?: boolean;
+  }) => Promise<AssembledTransaction<Array<Offer>>>
+
+  /**
    * Construct and simulate a get_user_purchases transaction. Returns an `AssembledTransaction` object which will have a `result` field containing the result of the simulation. If this transaction changes contract state, you will need to call `signAndSend()` on the returned object.
    */
   get_user_purchases: ({buyer, limit}: {buyer: string, limit: u32}, options?: {
@@ -1336,6 +1346,7 @@ export class Client extends ContractClient {
         reclaim_expired: this.txFromJSON<Result<void>>,
         set_listing_cap: this.txFromJSON<Result<void>>,
         get_user_listings: this.txFromJSON<Array<Listing>>,
+        get_offers_for_buyer: this.txFromJSON<Array<Offer>>,
         get_offers_for_bot: this.txFromJSON<Array<Offer>>,
         get_user_purchases: this.txFromJSON<Array<Purchase>>,
         listing_page_count: this.txFromJSON<u32>,

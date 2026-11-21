@@ -14,6 +14,7 @@ import type {
   UserProfile,
   BotTier,
   MarketplaceListing,
+  MarketplaceOffer,
   AccrualState,
   TierStats,
   TierInfo,
@@ -320,6 +321,23 @@ export function parseListing(rawData: Record<string, unknown>): MarketplaceListi
     active: Boolean(rawData.active),
     expires_at:
       rawData.expires_at == null ? undefined : toBigInt(rawData.expires_at, "expires_at"),
+  };
+}
+
+export function parseOffer(rawData: Record<string, unknown>): MarketplaceOffer {
+  const status = String(rawData.status ?? "Active");
+  if (status !== "Active" && status !== "Accepted" && status !== "Cancelled") {
+    throw new Error(`parseOffer: unknown offer status ${status}`);
+  }
+  return {
+    id: toBigInt(rawData.id, "offer.id"),
+    buyer: String(rawData.buyer ?? ""),
+    bot_id: toBigInt(rawData.bot_id, "offer.bot_id"),
+    amount: toBigInt(rawData.amount, "offer.amount"),
+    currency: String(rawData.currency ?? ""),
+    created_at: toBigInt(rawData.created_at, "offer.created_at"),
+    expires_at: toBigInt(rawData.expires_at, "offer.expires_at"),
+    status: status as MarketplaceOffer["status"],
   };
 }
 
@@ -842,6 +860,20 @@ export async function getUserListings(userAddress: string): Promise<MarketplaceL
     );
   }
   return listingsRaw.map((listing) => parseListing(listing));
+}
+
+/** Read the connected user's escrowed offers so they can cancel them. */
+export async function getUserOffers(userAddress: string): Promise<MarketplaceOffer[]> {
+  const offersRaw = await simulateContractCall<Record<string, unknown>[]>(
+    CONTRACT_ADDRESSES.marketplace,
+    "get_offers_for_buyer",
+    [nativeToScVal(userAddress, { type: "address" })],
+    userAddress,
+  );
+  if (!Array.isArray(offersRaw)) {
+    throw new Error(`get_offers_for_buyer returned unexpected type ${typeof offersRaw}; expected array`);
+  }
+  return offersRaw.map(parseOffer).filter((offer) => offer.status === "Active");
 }
 
 /**

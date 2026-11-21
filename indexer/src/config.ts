@@ -38,16 +38,25 @@ function normalizeContractId(raw: string | undefined | null): string | null {
   return id.toUpperCase();
 }
 
+/** Parse dotenv lines used by the indexer without treating comments as values. */
+export function parseDotEnvLocal(txt: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const line of txt.split("\n")) {
+    const m = line.match(/^\s*(?:export\s+)?([A-Z0-9_]+)\s*=\s*(.*?)\s*$/);
+    if (!m) continue;
+    let value = m[2];
+    const quoted = (value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"));
+    if (!quoted) value = value.replace(/\s+#.*$/, "").trim();
+    out[m[1]] = value.replace(/^["']|["']$/g, "");
+  }
+  return out;
+}
+
 /** Read `frontend/.env.local` and return KEY=VALUE pairs. */
 function readDotEnvLocal(file: string): Record<string, string> {
   try {
     const txt = fs.readFileSync(file, "utf8");
-    const out: Record<string, string> = {};
-    for (const line of txt.split("\n")) {
-      const m = line.match(/^([A-Z0-9_]+)\s*=\s*(.*)$/);
-      if (m) out[m[1]] = m[2].replace(/^["']|["']$/g, "");
-    }
-    return out;
+    return parseDotEnvLocal(txt);
   } catch {
     return {};
   }
