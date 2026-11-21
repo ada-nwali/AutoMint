@@ -40,3 +40,5 @@ export const useWalletStore = create<WalletStore>()(
     }
   )
 );
+
+export const selectPublicKey = (state: WalletStore) => state.publicKey;

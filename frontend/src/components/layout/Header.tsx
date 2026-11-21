@@ -16,7 +16,7 @@ const navLinks = [
   { label: "Leaderboard", href: "/leaderboard" },
 ]
 
-export default function Header() {
+export function Header() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const pathname = usePathname();
   const { publicKey, isConnected, networkMismatch, isConnecting, isNotInstalled, connect, disconnect } = useWallet();

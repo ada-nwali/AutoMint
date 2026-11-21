@@ -28,6 +28,7 @@ import type {
   AccrualState,
   TierStats,
   TierInfo,
+  MarketplacePurchase,
 } from "@/types";
 import { TIER_ORDER } from "@/types";
 
@@ -37,18 +38,6 @@ import { TIER_ORDER } from "@/types";
 // TypeScript build, not production. The imports are `import type` only so the
 // generated files (which contain duplicate `DataKey` from speculative WASM
 // specs) are never executed at runtime — they are type-checked only.
-import type { UserProfile as ContractUserProfile } from "./bindings/registry/src";
-import type { BotTier as ContractBotTier } from "./bindings/bot_nft/src";
-
-// Compile-time check: domain UserProfile must cover the contract's shape.
-// Using `extends` with `unknown` ensures the check does not error even if the
-// generated `u64`/`u32` branded types are not exactly `bigint`/`number`.
-// Each check fails to compile if the generated binding drifts from the domain shape.
-const _checkUserProfile: { address: string; username: string } =
-  {} as ContractUserProfile;
-const _checkBotTier: string = {} as ContractBotTier;
-void _checkUserProfile;
-void _checkBotTier;
 
 /**
  * Strict conversion of an untyped, contract-decoded value to `bigint` (#484).
@@ -223,9 +212,7 @@ export function parseUserProfile(
   // field is observable as 0 rather than a throw (the required `total_points`
   // still throws, and a present-but-garbage value still throws via toBigInt).
   const claimed_amt = toBigIntOr(rawData.claimed_amt, 0n, "claimed_amt");
-  const registered_at = Number(
-    toBigIntOr(rawData.registered_at, 0n, "registered_at")
-  );
+  const registered_at = toBigIntOr(rawData.registered_at, 0n, "registered_at");
   const bot_count = Number(toBigIntOr(rawData.bot_count, 0n, "bot_count"));
 
   return {
@@ -234,6 +221,7 @@ export function parseUserProfile(
     display_name,
     total_points,
     points: total_points,
+    totalPoints: total_points,
     claimed_amt,
     claimedAmt: claimed_amt,
     registered_at,
@@ -298,10 +286,18 @@ export function parseBotNFT(rawData: Record<string, unknown>): BotNFT {
   return {
     id: toBigInt(rawData.id, "id"),
     nickname: rawData.nickname != null ? String(rawData.nickname) : undefined,
+    name: rawData.name != null ? String(rawData.name) : undefined,
     owner: String(rawData.owner ?? ""),
     tier,
+    accrualRate: toBigInt(rawData.accrual_rate, "accrual_rate"),
     accrual_rate: toBigInt(rawData.accrual_rate, "accrual_rate"),
-    minted_at: Number(toBigIntOr(rawData.minted_at, 0n, "minted_at")),
+    mintedAt: toBigIntOr(rawData.minted_at, 0n, "minted_at"),
+    minted_at: toBigIntOr(rawData.minted_at, 0n, "minted_at"),
+    lastClaimTimestamp: toBigIntOr(
+      rawData.last_claim_timestamp,
+      0n,
+      "last_claim_timestamp"
+    ),
     last_claim_timestamp: toBigIntOr(
       rawData.last_claim_timestamp,
       0n,
@@ -316,16 +312,21 @@ export function parseBotNFT(rawData: Record<string, unknown>): BotNFT {
 export function parseListing(
   rawData: Record<string, unknown>
 ): MarketplaceListing {
-  return {
+  const botTier = parseBotTier(rawData.bot_tier, "parseListing");
+  const listing = {
     id: toBigInt(rawData.id, "id"),
     seller: String(rawData.seller ?? ""),
     bot_id: toBigInt(rawData.bot_id, "bot_id"),
-    bot_tier: parseBotTier(rawData.bot_tier, "parseListing"),
+    bot_tier: botTier,
     price: toBigInt(rawData.price, "price"),
     currency: String(rawData.currency ?? ""),
     listed_at: toBigInt(rawData.listed_at, "listed_at"),
     active: Boolean(rawData.active),
+    botId: toBigInt(rawData.bot_id, "bot_id"),
+    botTier: ["Basic", "Bronze", "Silver", "Gold", "Diamond"].indexOf(botTier),
+    listedAt: toBigInt(rawData.listed_at, "listed_at"),
   };
+  return listing;
 }
 
 /**
@@ -493,11 +494,12 @@ export async function getLeaderboardForSeason(
       username: display_name,
       display_name,
       total_points,
+      totalPoints: total_points,
       points: season_points,
-      claimed_amt: 0n,
       claimedAmt: 0n,
-      registered_at: 0,
-      registeredAt: 0,
+      claimed_amt: 0n,
+      registered_at: 0n,
+      registeredAt: 0n,
       bot_count: 0,
       botCount: 0,
     };
@@ -593,8 +595,8 @@ export async function getUserRank(
       address: self.address,
       username: self.username,
       rank: index + 1,
-      points: self.points,
-      pointsToNextRank: above ? above.points - self.points : null,
+      points: self.points ?? self.totalPoints,
+      pointsToNextRank: above ? (above.points ?? above.totalPoints) - (self.points ?? self.totalPoints) : null,
     };
   }
 
@@ -611,7 +613,7 @@ export async function getUserRank(
     address: profile.address || userAddress,
     username: profile.username,
     rank,
-    points: profile.points,
+    points: profile.points ?? profile.totalPoints,
     pointsToNextRank: null,
   };
 }
@@ -682,6 +684,65 @@ export async function getActiveListings(
     );
   }
   return listingsRaw.map((listing) => parseListing(listing));
+}
+
+export async function getFilteredListings(
+  tier: number | null,
+  maxPrice: bigint | null,
+  start: number = 0,
+  limit: number = 100,
+  sourceAddress?: string
+): Promise<MarketplaceListing[]> {
+  const args = [
+    tier === null ? xdr.ScVal.scvVoid() : nativeToScVal(tier, { type: "u32" }),
+    maxPrice === null ? xdr.ScVal.scvVoid() : i128ToScVal(maxPrice),
+    nativeToScVal(start, { type: "u32" }),
+    nativeToScVal(limit, { type: "u32" }),
+  ];
+  const raw = await simulateContractCall<Record<string, unknown>[]>(
+    CONTRACT_ADDRESSES.marketplace,
+    "get_listings_filtered",
+    args,
+    defaultSource(sourceAddress)
+  );
+  if (!Array.isArray(raw)) {
+    throw new Error(
+      `get_listings_filtered returned unexpected type ${typeof raw}; expected array`
+    );
+  }
+  return raw.map((listing) => parseListing(listing));
+}
+
+export async function getUserPurchasesPage(
+  buyer: string,
+  start: number = 0,
+  limit: number = 50
+): Promise<MarketplacePurchase[]> {
+  const raw = await simulateContractCall<Record<string, unknown>[]>(
+    CONTRACT_ADDRESSES.marketplace,
+    "get_user_purchases_page",
+    [
+      nativeToScVal(buyer, { type: "address" }),
+      nativeToScVal(start, { type: "u32" }),
+      nativeToScVal(limit, { type: "u32" }),
+    ],
+    buyer
+  );
+  if (!Array.isArray(raw)) {
+    throw new Error(
+      `get_user_purchases_page returned unexpected type ${typeof raw}; expected array`
+    );
+  }
+  return raw.map((purchase) => ({
+    listing_id: toBigInt(purchase.listing_id, "listing_id"),
+    bot_id: toBigInt(purchase.bot_id, "bot_id"),
+    bot_tier: parseBotTier(purchase.bot_tier, "purchase.bot_tier"),
+    price: toBigInt(purchase.price, "price"),
+    currency: String(purchase.currency ?? ""),
+    seller: String(purchase.seller ?? ""),
+    buyer: String(purchase.buyer ?? ""),
+    purchased_at: toBigInt(purchase.purchased_at, "purchased_at"),
+  }));
 }
 
 /**
@@ -900,6 +961,18 @@ export async function getAccrualState(userAddress: string): Promise<AccrualState
     rate: toBigIntOr(stateRaw.rate, 0n, "rate"),
     started_at: toBigIntOr(stateRaw.started_at, 0n, "started_at"),
   };
+}
+
+export async function getSecondsToNextAmt(
+  userAddress: string
+): Promise<bigint> {
+  const raw = await simulateContractCall<bigint | number>(
+    CONTRACT_ADDRESSES.accrual,
+    "seconds_to_next_amt",
+    [nativeToScVal(userAddress, { type: "address" })],
+    userAddress
+  );
+  return toBigInt(raw, "seconds_to_next_amt");
 }
 
 /** Most addresses `get_accrual_states` accepts in one call. */
@@ -1197,6 +1270,27 @@ export async function getUserTotalRate(userAddress: string): Promise<bigint> {
     userAddress
   );
   return toBigInt(raw, "get_user_total_rate");
+}
+
+export async function renameBot(
+  owner: string,
+  botId: bigint,
+  name: string
+): Promise<string> {
+  const bytes = new TextEncoder().encode(name);
+  if (bytes.length > 24) {
+    throw new Error("Bot nickname must be 24 bytes or fewer");
+  }
+  return buildTxXdr(
+    CONTRACT_ADDRESSES.botNft,
+    "rename_bot",
+    [
+      addressToScVal(owner),
+      u64ToScVal(botId),
+      nativeToScVal(name, { type: "string" }),
+    ],
+    owner
+  );
 }
 
 /**

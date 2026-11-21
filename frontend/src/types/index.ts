@@ -1,23 +1,35 @@
 // ── Contract data types (matching Soroban contracttype structs) ───────────────
 
 export type BotTier = 'Basic' | 'Bronze' | 'Silver' | 'Gold' | 'Diamond';
+export type Tier = BotTier;
 
 export interface BotNFT {
   id: bigint;
   tier: BotTier;
   owner: string;
-  accrualRate: bigint; // points per hour
-  mintedAt: bigint;
-  name: string;
+  nickname?: string;
+  name?: string;
+  accrualRate?: bigint; // points per hour
+  accrual_rate?: bigint;
+  mintedAt?: bigint;
+  minted_at?: bigint;
+  lastClaimTimestamp?: bigint;
+  last_claim_timestamp?: bigint;
 }
 
 export interface UserProfile {
   address: string;
   username: string;
   totalPoints: bigint;
+  points?: bigint;
+  total_points?: bigint;
+  claimed_amt?: bigint;
+  display_name?: string;
   claimedAmt: bigint;
   registeredAt: bigint;
+  registered_at?: bigint;
   botCount: number;
+  bot_count?: number;
 }
 
 export interface Listing {
@@ -31,10 +43,58 @@ export interface Listing {
   active: boolean;
 }
 
-export interface AccrualState {
-  lastClaimTs: bigint;
-  totalClaimedPoints: bigint;
+export interface MarketplaceListing {
+  id: bigint;
+  seller: string;
+  bot_id: bigint;
+  bot_tier: BotTier;
+  price: bigint;
+  currency: string;
+  listed_at: bigint;
+  active: boolean;
+  // Camel-case aliases used by existing marketplace cards.
+  botId: bigint;
+  botTier: number;
+  listedAt: bigint;
 }
+
+export interface MarketplacePurchase {
+  listing_id: bigint;
+  bot_id: bigint;
+  bot_tier: BotTier | number;
+  price: bigint;
+  currency: string;
+  seller: string;
+  buyer: string;
+  purchased_at: bigint;
+}
+
+export interface AccrualState {
+  last_claim_ts: bigint;
+  lastClaimTs?: bigint;
+  totalClaimedPoints?: bigint;
+  carry_points: bigint;
+  lifetime_points: bigint;
+  rate: bigint;
+  started_at: bigint;
+}
+
+export interface TierStats {
+  tier: BotTier;
+  volume: bigint;
+  sale_count: bigint;
+  last_sale_price: bigint;
+  floor_price: bigint;
+}
+
+export interface TierInfo {
+  tier?: BotTier;
+  name: string;
+  rate: bigint;
+  price: bigint;
+}
+
+export const TIER_ORDER: BotTier[] = ['Basic', 'Bronze', 'Silver', 'Gold', 'Diamond'];
 
 // ── UI state types ────────────────────────────────────────────────────────────
 

@@ -163,6 +163,33 @@ impl AccrualContract {
         env.storage().persistent().get(&DataKey::AccrualState(user))
     }
 
+    pub fn seconds_to_next_amt(env: Env, user: Address) -> u64 {
+        let state: AccrualState = match env
+            .storage()
+            .persistent()
+            .get(&DataKey::AccrualState(user.clone()))
+        {
+            Some(s) => s,
+            None => return 0,
+        };
+        let config: Config = match env.storage().instance().get(&DataKey::Config) {
+            Some(c) => c,
+            None => return 0,
+        };
+        let rate = call_get_total_rate(&env, &config.bot_nft, &user);
+        if rate == 0 {
+            return u64::MAX;
+        }
+        let points_left = config
+            .points_per_amt
+            .saturating_sub(state.total_claimed_points % config.points_per_amt);
+        let points_left = if points_left == 0 { config.points_per_amt } else { points_left };
+        points_left
+            .saturating_mul(3600)
+            .saturating_add(rate.saturating_sub(1))
+            .saturating_div(rate)
+    }
+
     pub fn config(env: Env) -> Config {
         env.storage().instance().get(&DataKey::Config).unwrap()
     }
@@ -222,8 +249,8 @@ mod test {
         let user = Address::generate(&env);
         env.ledger().with_mut(|l| { l.timestamp = 1_000_000; });
         reg.register(&user, &String::from_str(&env, "Tester"));
-        bot.mint_basic(&user).unwrap();
-        acc.start_accrual(&user).unwrap();
+        bot.mint_basic(&user);
+        acc.start_accrual(&user);
         env.ledger().with_mut(|l| { l.timestamp = 1_003_600; });
         // Basic: 1 pt/hr
         assert_eq!(acc.pending_points(&user), 1);
@@ -236,14 +263,14 @@ mod test {
         let user = Address::generate(&env);
         env.ledger().with_mut(|l| { l.timestamp = 0; });
         reg.register(&user, &String::from_str(&env, "Claimer"));
-        bot.mint_tier(&user, &automint_bot_nft::BotTier::Gold).unwrap();
-        acc.start_accrual(&user).unwrap();
+        bot.mint_tier(&user, &automint_bot_nft::BotTier::Gold);
+        acc.start_accrual(&user);
         // 2 hours → 200 pts → 2 AMT
         env.ledger().with_mut(|l| { l.timestamp = 7200; });
-        let claimed = acc.claim(&user).unwrap();
+        let claimed = acc.claim(&user);
         assert_eq!(claimed, 200);
         assert_eq!(tok.balance(&user), 2_i128);
-        assert_eq!(reg.get_user(&user).unwrap().total_points, 200);
+        assert_eq!(reg.get_user(&user).total_points, 200);
     }
 
     #[test]
@@ -253,9 +280,9 @@ mod test {
         let user = Address::generate(&env);
         env.ledger().with_mut(|l| { l.timestamp = 0; });
         reg.register(&user, &String::from_str(&env, "Multi"));
-        bot.mint_basic(&user).unwrap();
-        bot.mint_tier(&user, &automint_bot_nft::BotTier::Silver).unwrap();
-        acc.start_accrual(&user).unwrap();
+        bot.mint_basic(&user);
+        bot.mint_tier(&user, &automint_bot_nft::BotTier::Silver);
+        acc.start_accrual(&user);
         env.ledger().with_mut(|l| { l.timestamp = 3600; });
         // 1 + 25 = 26 pts/hr
         assert_eq!(acc.pending_points(&user), 26);
@@ -268,10 +295,10 @@ mod test {
         let user = Address::generate(&env);
         env.ledger().with_mut(|l| { l.timestamp = 0; });
         reg.register(&user, &String::from_str(&env, "Resetter"));
-        bot.mint_tier(&user, &automint_bot_nft::BotTier::Gold).unwrap();
-        acc.start_accrual(&user).unwrap();
+        bot.mint_tier(&user, &automint_bot_nft::BotTier::Gold);
+        acc.start_accrual(&user);
         env.ledger().with_mut(|l| { l.timestamp = 3600; });
-        acc.claim(&user).unwrap();
+        acc.claim(&user);
         // Pending should be 0 right after claim
         assert_eq!(acc.pending_points(&user), 0);
     }
@@ -291,12 +318,12 @@ mod test {
         let user = Address::generate(&env);
         env.ledger().with_mut(|l| { l.timestamp = 1000; });
         reg.register(&user, &String::from_str(&env, "Idm"));
-        bot.mint_basic(&user).unwrap();
-        acc.start_accrual(&user).unwrap();
+        bot.mint_basic(&user);
+        acc.start_accrual(&user);
         // Calling again should not change last_claim_ts
         let state1 = acc.get_accrual_state(&user).unwrap();
         env.ledger().with_mut(|l| { l.timestamp = 2000; });
-        acc.start_accrual(&user).unwrap();
+        acc.start_accrual(&user);
         let state2 = acc.get_accrual_state(&user).unwrap();
         assert_eq!(state1.last_claim_ts, state2.last_claim_ts);
     }
@@ -308,8 +335,8 @@ mod test {
         let user = Address::generate(&env);
         env.ledger().with_mut(|l| { l.timestamp = 0; });
         reg.register(&user, &String::from_str(&env, "Low"));
-        bot.mint_basic(&user).unwrap(); // 1 pt/hr
-        acc.start_accrual(&user).unwrap();
+        bot.mint_basic(&user); // 1 pt/hr
+        acc.start_accrual(&user);
         // Only 30 min — 0 pts (truncated)
         env.ledger().with_mut(|l| { l.timestamp = 1800; });
         // pending = 0 (1 * 1800 / 3600 = 0 due to integer division)

@@ -4,6 +4,7 @@ import { toast } from 'sonner';
 import { connectFreighter } from '@/lib/stellar';
 import { useWalletStore } from '@/store/walletStore';
 import { FREIGHTER_DOWNLOAD } from '@/lib/constants';
+import { NETWORK_PASSPHRASE } from '@/lib/constants';
 
 export function useWallet() {
   const store = useWalletStore();
@@ -40,5 +41,11 @@ export function useWallet() {
     isConnected: store.status === 'connected' && !!store.publicKey,
     connect,
     disconnect,
+    networkMismatch:
+      store.status === 'connected' &&
+      !!store.network &&
+      store.network !== NETWORK_PASSPHRASE,
+    isConnecting: store.status === 'connecting',
+    isNotInstalled: store.error === 'Freighter not installed',
   };
 }

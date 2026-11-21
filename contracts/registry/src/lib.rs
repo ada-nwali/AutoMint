@@ -221,7 +221,7 @@ mod test {
         let user = Address::generate(&env);
         client.register(&user, &String::from_str(&env, "Alice"));
         assert!(client.is_registered(&user));
-        let profile = client.get_user(&user).unwrap();
+        let profile = client.get_user(&user);
         assert_eq!(profile.total_points, 0);
         assert_eq!(profile.bot_count, 0);
     }
@@ -247,7 +247,7 @@ mod test {
         let user = Address::generate(&env);
         client.register(&user, &String::from_str(&env, "Bob"));
         client.add_points(&user, &500_u64);
-        let profile = client.get_user(&user).unwrap();
+        let profile = client.get_user(&user);
         assert_eq!(profile.total_points, 500);
     }
 
@@ -258,7 +258,7 @@ mod test {
         client.register(&user, &String::from_str(&env, "Charlie"));
         client.add_points(&user, &100_u64);
         client.add_points(&user, &250_u64);
-        assert_eq!(client.get_user(&user).unwrap().total_points, 350);
+        assert_eq!(client.get_user(&user).total_points, 350);
     }
 
     #[test]
@@ -316,8 +316,8 @@ mod test {
         client.register(&user, &String::from_str(&env, "BotUser"));
         client.increment_bot_count(&user);
         client.increment_bot_count(&user);
-        assert_eq!(client.get_user(&user).unwrap().bot_count, 2);
+        assert_eq!(client.get_user(&user).bot_count, 2);
         client.decrement_bot_count(&user);
-        assert_eq!(client.get_user(&user).unwrap().bot_count, 1);
+        assert_eq!(client.get_user(&user).bot_count, 1);
     }
 }

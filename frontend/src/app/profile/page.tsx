@@ -1,14 +1,17 @@
 'use client';
 import { motion } from 'framer-motion';
+import { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { User, Copy, ExternalLink, Bot, Zap, Coins, Calendar } from 'lucide-react';
 import { useWallet } from '@/hooks/useWallet';
 import { useAccrual } from '@/hooks/useAccrual';
 import { BotCard } from '@/components/dashboard/BotCard';
 import { CardSkeleton, BotCardSkeleton } from '@/components/ui/Skeleton';
-import { formatPoints, TIER_META } from '@/types';
+import { formatPoints, TIER_META, tierFromIndex } from '@/types';
 import { truncateAddress } from '@/lib/stellar';
 import { toast } from 'sonner';
 import { NETWORK } from '@/lib/constants';
+import { getUserPurchasesPage } from '@/lib/contracts';
 
 function copyToClipboard(text: string) {
   navigator.clipboard.writeText(text);
@@ -18,6 +21,12 @@ function copyToClipboard(text: string) {
 export default function ProfilePage() {
   const { isConnected, publicKey, connect, status } = useWallet();
   const { profile, bots, amtBalance, ratePerHour, isLoading } = useAccrual(publicKey);
+  const [activeTab, setActiveTab] = useState<'bots' | 'purchases'>('bots');
+  const purchasesQuery = useQuery({
+    queryKey: ['purchases', publicKey],
+    queryFn: () => publicKey ? getUserPurchasesPage(publicKey) : Promise.resolve([]),
+    enabled: !!publicKey,
+  });
 
   const horizonUrl = NETWORK === 'MAINNET'
     ? `https://stellar.expert/explorer/public/account/${publicKey}`
@@ -180,14 +189,59 @@ export default function ProfilePage() {
         </div>
       )}
 
-      {/* Bot grid */}
-      {bots.length > 0 && (
-        <div>
-          <h3 className="memefi-h3 text-sm mb-4" style={{ fontSize: '14px' }}>All Bots</h3>
+      <div
+        className="flex items-center gap-1 mb-5 p-1 w-fit rounded-xl"
+        style={{ background: 'var(--card)' }}
+      >
+        {([
+          ['bots', `Bots (${bots.length})`],
+          ['purchases', `Purchases (${purchasesQuery.data?.length ?? 0})`],
+        ] as const).map(([id, label]) => (
+          <button
+            key={id}
+            onClick={() => setActiveTab(id)}
+            className="px-4 py-2 rounded-lg text-sm font-semibold"
+            style={activeTab === id
+              ? { background: 'var(--card-2)', color: 'var(--text)' }
+              : { background: 'transparent', color: 'var(--muted)' }}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {activeTab === 'bots' ? (
+        bots.length > 0 ? (
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
             {bots.map((bot) => <BotCard key={String(bot.id)} bot={bot} />)}
           </div>
-        </div>
+        ) : (
+          <p className="text-sm text-center py-10" style={{ color: 'var(--muted)' }}>No bots yet.</p>
+        )
+      ) : (
+        purchasesQuery.isLoading ? (
+          <div className="grid gap-3"><CardSkeleton /><CardSkeleton /></div>
+        ) : purchasesQuery.data?.length ? (
+          <div className="grid gap-3">
+            {purchasesQuery.data.map((purchase) => {
+              const tierName = typeof purchase.bot_tier === 'string'
+                ? purchase.bot_tier
+                : TIER_META[tierFromIndex(Number(purchase.bot_tier)) as keyof typeof TIER_META].tier;
+              const date = new Date(Number(purchase.purchased_at) * 1000).toLocaleString();
+              return (
+                <div key={`${purchase.listing_id}-${purchase.bot_id}`} className="mf-card-2 flex items-center justify-between" style={{ padding: '16px 20px' }}>
+                  <div>
+                    <div className="font-bold text-sm" style={{ color: 'var(--text)' }}>{tierName} Bot #{String(purchase.bot_id)}</div>
+                    <div className="text-xs mt-1" style={{ color: 'var(--muted)' }}>Seller {truncateAddress(purchase.seller, 8)} · {date}</div>
+                  </div>
+                  <div className="text-sm font-bold" style={{ color: 'var(--gold)' }}>{(Number(purchase.price) / 10_000_000).toLocaleString()} AMT</div>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <p className="text-sm text-center py-10" style={{ color: 'var(--muted)' }}>No on-chain purchases yet.</p>
+        )
       )}
     </div>
   );

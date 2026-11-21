@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   getActiveListings,
+  getFilteredListings,
   getUserListings,
   getMarketStats,
   buildListBotArgs,
@@ -180,10 +181,10 @@ export function useMintTierBot() {
   });
 }
 
-export function useListings() {
+export function useListings(tier: number | null = null, maxPrice: bigint | null = null) {
   return useQuery({
-    queryKey: qk.listings(),
-    queryFn: () => getActiveListings(),
+    queryKey: qk.filteredListings(tier, maxPrice),
+    queryFn: () => getFilteredListings(tier, maxPrice),
     refetchInterval: pollWhenVisible(),
     staleTime: STALE_TIME.SHORT,
     gcTime: GC_TIME.SHORT,
@@ -219,8 +220,20 @@ export function useListBot() {
   const publicKey = useWalletStore(selectPublicKey);
 
   return useMutation({
-    mutationFn: async ({ botId, price }: { botId: bigint; price: bigint }) => {
+    mutationFn: async ({
+      botId,
+      price,
+      priceStroops,
+    }: {
+      botId: bigint;
+      price?: bigint;
+      priceStroops?: bigint;
+      botTier?: number;
+      currencyAddress?: string;
+    }) => {
       if (!publicKey) throw new Error("Wallet not connected");
+      const finalPrice = priceStroops ?? price;
+      if (finalPrice == null) throw new Error("Price is required");
 
       const MARKETPLACE_CONTRACT_ID = CONTRACT_ADDRESSES.marketplace;
       const txId = newTxId("list_bot");
@@ -232,7 +245,7 @@ export function useListBot() {
           // list_bot(seller, bot_id, price, currency): the connected wallet is
           // the seller whose auth the contract requires; currency is the
           // configured payment token.
-          args: buildListBotArgs(publicKey, botId, price),
+          args: buildListBotArgs(publicKey, botId, finalPrice),
           sourceAddress: publicKey,
           onStatus: (status: TransactionStatus) => {
             trackStatus(txId, "Listing", status);
@@ -276,7 +289,7 @@ export function useListBot() {
         }).catch(reject);
       });
     },
-    onMutate: async ({ botId }: { botId: bigint; price: bigint }) => {
+    onMutate: async ({ botId }: { botId: bigint; price?: bigint; priceStroops?: bigint; botTier?: number; currencyAddress?: string }) => {
       // Optimistic update (#462): remove the bot from the owned list.
       await queryClient.cancelQueries({ queryKey: qk.bots(publicKey) });
       await queryClient.cancelQueries({ queryKey: qk.dashboard(publicKey) });
@@ -288,13 +301,13 @@ export function useListBot() {
       queryClient.setQueryData(
         qk.dashboard(publicKey),
         (old: DashboardData | undefined) =>
-          old ? { ...old, bots: old.bots.filter((id) => id !== botId) } : old
+          old ? { ...old, bots: old.bots.filter((id: bigint) => id !== botId) } : old
       );
       return { previousBots, previousDashboard };
     },
     onError: (
       error: Error,
-      _variables: { botId: bigint; price: bigint },
+      _variables: { botId: bigint; price?: bigint; priceStroops?: bigint; botTier?: number; currencyAddress?: string },
       context: { previousBots: unknown; previousDashboard: unknown } | undefined
     ) => {
       if (context) {
@@ -403,4 +416,55 @@ export function useCancelListing() {
       queryClient.invalidateQueries({ queryKey: ["botDetails"] });
     },
   });
+}
+
+export function useMarketplace(
+  _publicKey: string | null,
+  tierFilter: number | null = null,
+  maxPrice: bigint | null = null
+) {
+  const listingsQuery = useListings(tierFilter, maxPrice);
+  const myListingsQuery = useMyListings();
+  const buyMutation = useBuyBot();
+  const cancelMutation = useCancelListing();
+  const listMutation = useListBot();
+  const mintMutation = useMintTierBot();
+
+  return {
+    listings: listingsQuery.data ?? [],
+    myListings: myListingsQuery.data ?? [],
+    loadingListings: listingsQuery.isLoading,
+    isBuying: buyMutation.isPending,
+    isCancelling: cancelMutation.isPending,
+    isMintingTier: mintMutation.isPending,
+    isListing: listMutation.isPending,
+    buyBot: buyMutation.mutateAsync,
+    cancelListing: cancelMutation.mutateAsync,
+    listBot: async (params: {
+      botId: bigint;
+      botTier: number;
+      priceStroops: bigint;
+      currencyAddress: string;
+    }) => {
+      await listMutation.mutateAsync({
+        botId: params.botId,
+        priceStroops: params.priceStroops,
+        botTier: params.botTier,
+        currencyAddress: params.currencyAddress,
+      });
+    },
+    mintTierBot: async (tierIndex: number) => {
+      const tiers = ["Basic", "Bronze", "Silver", "Gold", "Diamond"] as const;
+      const tier = tiers[tierIndex];
+      if (!tier || tier === "Basic") throw new Error("Choose a paid tier");
+      await mintMutation.mutateAsync({
+        tier,
+        token: CONTRACT_ADDRESSES.token,
+      });
+    },
+    refetch: () => {
+      listingsQuery.refetch();
+      myListingsQuery.refetch();
+    },
+  };
 }

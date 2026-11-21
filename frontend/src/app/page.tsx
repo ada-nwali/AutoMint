@@ -236,7 +236,7 @@ export default function LandingPage() {
           <div>
             <h2 className="memefi-h2 mb-5">Built for the Stellar Ecosystem</h2>
             <p className="mb-7 text-sm" style={{ color: 'var(--muted)', lineHeight: 1.8 }}>
-              AutoMint uses Soroban smart contracts and Stellar's near-zero fees to make idle gaming economically viable — even for micro-rewards.
+              AutoMint uses Soroban smart contracts and Stellar&apos;s near-zero fees to make idle gaming economically viable — even for micro-rewards.
             </p>
             <ul className="space-y-2.5">
               {FEATURES.map((f) => (
