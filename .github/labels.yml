@@ -1,0 +1,73 @@
+# AutoMint GitHub Repository Labels
+
+- name: "area:contract"
+  color: "0052cc"
+  description: "Issues and PRs related to Soroban smart contracts in contracts/"
+
+- name: "area:frontend"
+  color: "1d76db"
+  description: "Issues and PRs related to the Next.js frontend application"
+
+- name: "area:docs"
+  color: "0075ca"
+  description: "Issues and PRs related to project documentation and ADRs"
+
+- name: "area:ci"
+  color: "5319e7"
+  description: "Issues and PRs related to GitHub Actions workflows and CI automation"
+
+- name: "area:setup"
+  color: "bfd4f2"
+  description: "Issues and PRs related to repository configuration, toolchains, or scripts"
+
+- name: "contract:registry"
+  color: "d4c5f9"
+  description: "Soroban User Profile & Leaderboard Registry Contract"
+
+- name: "contract:bot_nft"
+  color: "d4c5f9"
+  description: "Soroban Bot NFT Minting & Tier Ownership Contract"
+
+- name: "contract:accrual"
+  color: "d4c5f9"
+  description: "Soroban Point Accrual & Token Mint Redemption Contract"
+
+- name: "contract:marketplace"
+  color: "d4c5f9"
+  description: "Soroban P2P Bot NFT Escrow Marketplace Contract"
+
+- name: "contract:token"
+  color: "d4c5f9"
+  description: "Soroban SEP-41 AMT Token Contract"
+
+- name: "type:bug"
+  color: "d93f0b"
+  description: "Something isn't working as expected"
+
+- name: "type:feature"
+  color: "a2eeef"
+  description: "New feature or enhancement proposal"
+
+- name: "type:security"
+  color: "b60205"
+  description: "Security vulnerability, smart contract invariant, or auth concern"
+
+- name: "type:refactor"
+  color: "cfd3d7"
+  description: "Code refactoring or structural improvement without behavior change"
+
+- name: "type:docs"
+  color: "0075ca"
+  description: "Documentation updates or corrections"
+
+- name: "difficulty:easy"
+  color: "0e8a16"
+  description: "Good for first-time contributors or simple one-file fixes"
+
+- name: "difficulty:medium"
+  color: "fbca04"
+  description: "Requires moderate codebase understanding"
+
+- name: "difficulty:hard"
+  color: "d93f0b"
+  description: "Complex architectural or multi-contract changes"

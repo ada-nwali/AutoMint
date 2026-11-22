@@ -1,0 +1,89 @@
+name: Feature Request
+description: Suggest features or improvements for testnet implementation
+title: "[Feature]: "
+labels: ["type:feature"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Suggesting a new feature or improvement for the testnet implementation phase?
+
+        **Note**: Feature requests will be scoped to the `testnet-implementation` branch.
+
+  - type: textarea
+    id: problem-statement
+    attributes:
+      label: Problem Statement / Context
+      description: Is your feature request related to a problem or user experience friction?
+      placeholder: Describe the problem or use case...
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposed-solution
+    attributes:
+      label: Proposed Solution
+      description: Describe the solution or user experience you would like to see implemented.
+      placeholder: Detail the feature implementation...
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives-considered
+    attributes:
+      label: Alternatives Considered
+      description: Describe any alternative solutions or features you have considered.
+    validations:
+      required: false
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Target Component / Area
+      options:
+        - "area:frontend"
+        - "area:contract"
+        - "area:docs"
+        - "area:ci"
+        - "area:setup"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: contract
+    attributes:
+      label: Contract (if applicable)
+      description: Which contract is affected?
+      options:
+        - "Not applicable"
+        - "contract:registry"
+        - "contract:bot_nft"
+        - "contract:accrual"
+        - "contract:marketplace"
+        - "contract:token"
+    validations:
+      required: false
+
+  - type: dropdown
+    id: difficulty
+    attributes:
+      label: Estimated Difficulty
+      description: If you have an estimate, select the expected implementation difficulty
+      options:
+        - "difficulty:easy"
+        - "difficulty:medium"
+        - "difficulty:hard"
+    validations:
+      required: false
+
+  - type: textarea
+    id: acceptance-criteria
+    attributes:
+      label: Acceptance Criteria
+      description: What conditions must be met for this feature to be considered complete?
+      placeholder: |
+        - [ ] Criterion 1
+        - [ ] Criterion 2
+        - [ ] Criterion 3
+    validations:
+      required: false
