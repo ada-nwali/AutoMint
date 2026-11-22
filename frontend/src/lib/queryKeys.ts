@@ -112,4 +112,8 @@ export const qk = {
   minListingPrice: (currency: string): QueryKey => ["minListingPrice", currency],
   /** bot_nft `tier_remaining(tier)` (#1418). */
   tierRemaining: (tier: string): QueryKey => ["tierRemaining", tier],
+  /** Marketplace `get_offers_for_bot(bot_id)` (#1409). */
+  botOffers: (botId: bigint): QueryKey => ["botOffers", botId.toString()],
+  /** Aggregated incoming offers on user's bots (#1409). */
+  incomingOffers: (address: string | null): QueryKey => ["incomingOffers", address],
 } as const;

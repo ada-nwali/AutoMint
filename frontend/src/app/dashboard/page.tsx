@@ -24,6 +24,7 @@ import RegistrationBanner from "@/components/dashboard/RegistrationBanner";
 import UpgradePrompt from "@/components/dashboard/UpgradePrompt";
 import TierShop from "@/components/dashboard/TierShop";
 import SendBotModal from "@/components/dashboard/SendBotModal";
+import OffersSection from "@/components/dashboard/OffersSection";
 import { ErrorState } from "@/components/ui/ErrorState";
 import { Wallet, Loader2, Bot } from "lucide-react";
 import clsx from "clsx";
@@ -362,6 +363,10 @@ export default function DashboardPage() {
             </div>
           )}
         </div>
+      </div>
+
+      <div className="mt-8">
+        <OffersSection />
       </div>
 
       {sendingBot && (

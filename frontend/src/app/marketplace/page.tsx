@@ -9,6 +9,8 @@ import {
   useMyListings,
   useBuyBot,
   useCancelListing,
+  useReclaimExpired,
+  useUpdatePrice,
 } from "@/hooks/useMarketplace";
 import { useAllBotDetails } from "@/hooks/useBotDetails";
 import { useBots } from "@/hooks/useAccrual";
@@ -69,6 +71,7 @@ export default function MarketplacePage() {
   const [sendingBot, setSendingBot] = useState<BotNFT | null>(null);
   const [buyingId, setBuyingId] = useState<bigint | null>(null);
   const [cancellingId, setCancellingId] = useState<bigint | null>(null);
+  const [reclaimingId, setReclaimingId] = useState<bigint | null>(null);
 
   const {
     data: allListings,
@@ -123,6 +126,8 @@ export default function MarketplacePage() {
   const buy = useBuyBot();
   const { buyPaused } = usePauseStatus();
   const cancel = useCancelListing();
+  const reclaim = useReclaimExpired();
+  const updatePrice = useUpdatePrice();
 
   const sourceListings = tab === "mine" ? myListings : allListings;
 
@@ -162,6 +167,15 @@ export default function MarketplacePage() {
   const handleCancel = (listingId: bigint) => {
     setCancellingId(listingId);
     cancel.mutate(listingId, { onSettled: () => setCancellingId(null) });
+  };
+
+  const handleReclaim = (listingId: bigint) => {
+    setReclaimingId(listingId);
+    reclaim.mutate(listingId, { onSettled: () => setReclaimingId(null) });
+  };
+
+  const handleUpdatePrice = (listingId: bigint, newPrice: bigint) => {
+    updatePrice.mutate({ listingId, newPrice });
   };
 
   const handleListForSale = (botId: bigint) => {
@@ -301,8 +315,11 @@ export default function MarketplacePage() {
               connectedAddress={publicKey}
               onBuy={handleBuy}
               onCancel={handleCancel}
+              onReclaim={handleReclaim}
+              onUpdatePrice={handleUpdatePrice}
               isBuying={buyingId === listing.id}
               isCancelling={cancellingId === listing.id}
+              isReclaiming={reclaimingId === listing.id}
               isBuyPaused={buyPaused}
             />
           );
