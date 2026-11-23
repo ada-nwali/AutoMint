@@ -15,6 +15,6 @@ soroban-sdk = { workspace = true }
 automint-common = { path = "../common" }
 
 [dev-dependencies]
-soroban-sdk = { version = "=21.7.7", features = ["testutils"] }
+soroban-sdk = { version = "=29.0.1", features = ["testutils"] }
 automint-testutils = { path = "../testutils" }
 proptest = "1.6"
