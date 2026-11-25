@@ -14,6 +14,8 @@ import type {
   UserProfile,
   BotTier,
   MarketplaceListing,
+  BotOffer,
+  OfferStatus,
   AccrualState,
   TierStats,
   TierInfo,
@@ -323,6 +325,43 @@ export function parseListing(rawData: Record<string, unknown>): MarketplaceListi
   };
 }
 
+function parseOfferStatus(rawStatus: unknown, _context: string): OfferStatus {
+  if (typeof rawStatus === "string") {
+    if (rawStatus === "Active" || rawStatus === "Accepted" || rawStatus === "Cancelled") {
+      return rawStatus as OfferStatus;
+    }
+  }
+  if (Array.isArray(rawStatus) && rawStatus.length === 1 && typeof rawStatus[0] === "string") {
+    const candidate = rawStatus[0];
+    if (candidate === "Active" || candidate === "Accepted" || candidate === "Cancelled") {
+      return candidate as OfferStatus;
+    }
+  }
+  if (typeof rawStatus === "number" && Number.isInteger(rawStatus)) {
+    const variants: OfferStatus[] = ["Active", "Accepted", "Cancelled"];
+    if (variants[rawStatus]) {
+      return variants[rawStatus];
+    }
+  }
+  return "Active";
+}
+
+/**
+ * Parse a raw scVal map from the marketplace contract into a typed BotOffer (#1409).
+ */
+export function parseOffer(rawData: Record<string, unknown>): BotOffer {
+  return {
+    id: toBigInt(rawData.id, "id"),
+    buyer: String(rawData.buyer ?? ""),
+    bot_id: toBigInt(rawData.bot_id, "bot_id"),
+    amount: toBigInt(rawData.amount, "amount"),
+    currency: String(rawData.currency ?? ""),
+    created_at: toBigInt(rawData.created_at, "created_at"),
+    expires_at: toBigInt(rawData.expires_at, "expires_at"),
+    status: parseOfferStatus(rawData.status, "parseOffer"),
+  };
+}
+
 /**
  * Get the AMT token balance for a user.
  * Calls token contract's balance() function.
@@ -424,6 +463,65 @@ export function buildListBotArgs(
     addressToScVal(currency),
     u64ToScVal(durationSecs),
   ];
+}
+
+/**
+ * Build the argument list for the marketplace's
+ * `update_price(seller: Address, listing_id: u64, new_price: i128)` (#1406).
+ */
+export function buildUpdatePriceArgs(
+  seller: string,
+  listingId: bigint,
+  newPrice: bigint,
+): xdr.ScVal[] {
+  return [
+    addressToScVal(seller),
+    u64ToScVal(listingId),
+    i128ToScVal(newPrice),
+  ];
+}
+
+/**
+ * Build the argument list for the marketplace's
+ * `reclaim_expired(listing_id: u64)` (#1407).
+ */
+export function buildReclaimExpiredArgs(listingId: bigint): xdr.ScVal[] {
+  return [u64ToScVal(listingId)];
+}
+
+/**
+ * Build the argument list for the marketplace's
+ * `accept_offer(seller: Address, offer_id: u64)` (#1409).
+ */
+export function buildAcceptOfferArgs(seller: string, offerId: bigint): xdr.ScVal[] {
+  return [addressToScVal(seller), u64ToScVal(offerId)];
+}
+
+/**
+ * Build the argument list for the marketplace's
+ * `dismiss_offer(caller: Address, offer_id: u64)` (#1409).
+ */
+export function buildDismissOfferArgs(caller: string, offerId: bigint): xdr.ScVal[] {
+  return [addressToScVal(caller), u64ToScVal(offerId)];
+}
+
+/**
+ * Query active offers for a specific bot via `get_offers_for_bot(bot_id: u64)` (#1409).
+ */
+export async function getOffersForBot(
+  botId: bigint,
+  sourceAddress?: string,
+): Promise<BotOffer[]> {
+  const raw = await simulateContractCall<Record<string, unknown>[]>(
+    CONTRACT_ADDRESSES.marketplace,
+    "get_offers_for_bot",
+    [u64ToScVal(botId)],
+    defaultSource(sourceAddress),
+  );
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+  return raw.map((entry) => parseOffer(entry));
 }
 
 /**

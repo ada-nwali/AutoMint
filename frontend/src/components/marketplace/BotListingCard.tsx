@@ -2,26 +2,31 @@
 
 import { useState } from "react";
 import { motion } from "framer-motion";
-import { Bot, ShoppingCart, X, Zap, Tag } from "lucide-react";
+import { Bot, ShoppingCart, X, Zap, Tag, Pencil, RotateCcw } from "lucide-react";
 import clsx from "clsx";
 import { BotTier, BOT_TIER_NAMES, BOT_TIER_COLORS, BOT_TIER_BG_COLORS, TIER_META } from "@/types";
 import type { MarketplaceListing, BotNFT, UserProfile } from "@/types";
 import { fromBaseUnits, formatTimeLeft, isListingExpired } from "@/lib/format";
-import { useTokenDecimals, useTokenSymbol } from "@/hooks/useMarketplace";
+import { useTokenDecimals, useTokenSymbol, useReclaimExpired } from "@/hooks/useMarketplace";
 import ConfirmDialog from "@/components/ui/ConfirmDialog";
+import EditPriceModal from "@/components/marketplace/EditPriceModal";
 
 interface BotListingCardProps {
   listing: MarketplaceListing;
-  bot?: BotNFT;
-  sellerProfile?: UserProfile | null;
-  sellerUsername?: string;
+  bot?: BotNFT | undefined;
+  sellerProfile?: UserProfile | null | undefined;
+  sellerUsername?: string | undefined;
   connectedAddress: string | null;
   onBuy: (listingId: bigint) => void;
   onCancel: (listingId: bigint) => void;
-  isBuying?: boolean;
-  isCancelling?: boolean;
+  onReclaim?: ((listingId: bigint) => void) | undefined;
+  onEditPrice?: ((listing: MarketplaceListing) => void) | undefined;
+  onUpdatePrice?: ((listingId: bigint, newPrice: bigint) => void) | undefined;
+  isBuying?: boolean | undefined;
+  isCancelling?: boolean | undefined;
+  isReclaiming?: boolean | undefined;
   /** True while the marketplace or payment token is paused — `buy_bot` would fail (#1416). */
-  isBuyPaused?: boolean;
+  isBuyPaused?: boolean | undefined;
 }
 
 function truncateAddress(address: string): string {
@@ -37,8 +42,12 @@ export default function BotListingCard({
   connectedAddress,
   onBuy,
   onCancel,
+  onReclaim,
+  onEditPrice,
+  onUpdatePrice,
   isBuying = false,
   isCancelling = false,
+  isReclaiming = false,
   isBuyPaused: buyPaused = false,
 }: BotListingCardProps) {
   // #476: listings carry their own bot_tier now, so the card no longer
@@ -63,8 +72,13 @@ export default function BotListingCard({
   const expired = isListingExpired(listing);
   const buyDisabled = isBuying || !connectedAddress || buyPaused || expired;
 
+  const fallbackReclaim = useReclaimExpired();
+  const reclaimingInProgress = isReclaiming || fallbackReclaim.isPending;
+
   const [isBuyingConfirmed, setIsBuyingConfirmed] = useState(false);
   const [isCancellingConfirmed, setIsCancellingConfirmed] = useState(false);
+  const [isReclaimingConfirmed, setIsReclaimingConfirmed] = useState(false);
+  const [isEditingPrice, setIsEditingPrice] = useState(false);
 
   return (
     <motion.div
@@ -182,37 +196,109 @@ export default function BotListingCard({
 
       {/* Action button */}
       {isOwner ? (
-        <>
-          <ConfirmDialog
-            isOpen={isCancellingConfirmed}
-            onClose={() => setIsCancellingConfirmed(false)}
-            title="Cancel Listing"
-            description={`Are you sure you want to cancel listing ${botLabel} for ${priceDisplay.toLocaleString("en-US", { maximumFractionDigits: 2 })} ${currencySymbol}?`}
-            onConfirm={() => onCancel(listing.id)}
-            confirmText="Cancel"
-            cancelText="Keep Listed"
-          />
-          <button
-            type="button"
-            onClick={() => setIsCancellingConfirmed(true)}
-            disabled={isCancelling}
-            data-testid={`cancel-btn-${listing.id.toString()}`}
-            aria-label={
-              isCancelling ? `Cancelling listing for ${botLabel}` : `Cancel listing for ${botLabel}`
-            }
-            className={clsx(
-              "flex items-center justify-center gap-2 rounded-xl border px-4 py-2.5",
-              "text-sm font-medium transition-all",
-              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pink focus-visible:ring-offset-2 focus-visible:ring-offset-card",
-              isCancelling
-                ? "border-liner bg-card-2 text-muted cursor-not-allowed opacity-50"
-                : "border-pink/30 bg-pink/10 text-pink hover:bg-pink/20 hover:border-pink/50",
-            )}
-          >
-            <X className="h-4 w-4" aria-hidden="true" />
-            {isCancelling ? "Cancelling..." : "Cancel Listing"}
-          </button>
-        </>
+        expired ? (
+          <>
+            <ConfirmDialog
+              isOpen={isReclaimingConfirmed}
+              onClose={() => setIsReclaimingConfirmed(false)}
+              title="Reclaim Expired Bot"
+              description={`Are you sure you want to reclaim ${botLabel} back to your wallet?`}
+              onConfirm={() => {
+                if (onReclaim) {
+                  onReclaim(listing.id);
+                } else {
+                  fallbackReclaim.mutate(listing.id);
+                }
+                setIsReclaimingConfirmed(false);
+              }}
+              confirmText="Reclaim"
+              cancelText="Keep in Escrow"
+            />
+            <button
+              type="button"
+              onClick={() => setIsReclaimingConfirmed(true)}
+              disabled={reclaimingInProgress}
+              data-testid={`reclaim-btn-${listing.id.toString()}`}
+              aria-label={
+                reclaimingInProgress
+                  ? `Reclaiming ${botLabel}`
+                  : `Reclaim bot for ${botLabel}`
+              }
+              className={clsx(
+                "flex items-center justify-center gap-2 rounded-xl border px-4 py-2.5",
+                "text-sm font-medium transition-all",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold focus-visible:ring-offset-2 focus-visible:ring-offset-card",
+                reclaimingInProgress
+                  ? "border-liner bg-card-2 text-muted cursor-not-allowed opacity-50"
+                  : "border-gold/30 bg-gold/10 text-gold hover:bg-gold/20 hover:border-gold/50",
+              )}
+            >
+              <RotateCcw className="h-4 w-4" aria-hidden="true" />
+              {reclaimingInProgress ? "Reclaiming..." : "Reclaim bot"}
+            </button>
+          </>
+        ) : (
+          <>
+            <ConfirmDialog
+              isOpen={isCancellingConfirmed}
+              onClose={() => setIsCancellingConfirmed(false)}
+              title="Cancel Listing"
+              description={`Are you sure you want to cancel listing ${botLabel} for ${priceDisplay.toLocaleString("en-US", { maximumFractionDigits: 2 })} ${currencySymbol}?`}
+              onConfirm={() => onCancel(listing.id)}
+              confirmText="Cancel"
+              cancelText="Keep Listed"
+            />
+            <EditPriceModal
+              isOpen={isEditingPrice}
+              onClose={() => setIsEditingPrice(false)}
+              listing={listing}
+              bot={bot}
+              onUpdatePrice={onUpdatePrice}
+            />
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  if (onEditPrice) onEditPrice(listing);
+                  else setIsEditingPrice(true);
+                }}
+                disabled={isCancelling}
+                data-testid={`edit-price-btn-${listing.id.toString()}`}
+                aria-label={`Edit price for ${botLabel}`}
+                className={clsx(
+                  "flex flex-1 items-center justify-center gap-2 rounded-xl border px-3 py-2.5",
+                  "text-sm font-medium transition-all",
+                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold focus-visible:ring-offset-2 focus-visible:ring-offset-card",
+                  "border-gold/30 bg-gold/10 text-gold hover:bg-gold/20 hover:border-gold/50",
+                )}
+              >
+                <Pencil className="h-4 w-4" aria-hidden="true" />
+                Edit price
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setIsCancellingConfirmed(true)}
+                disabled={isCancelling}
+                data-testid={`cancel-btn-${listing.id.toString()}`}
+                aria-label={
+                  isCancelling ? `Cancelling listing for ${botLabel}` : `Cancel listing for ${botLabel}`
+                }
+                className={clsx(
+                  "flex flex-1 items-center justify-center gap-2 rounded-xl border px-3 py-2.5",
+                  "text-sm font-medium transition-all",
+                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pink focus-visible:ring-offset-2 focus-visible:ring-offset-card",
+                  isCancelling
+                    ? "border-liner bg-card-2 text-muted cursor-not-allowed opacity-50"
+                    : "border-pink/30 bg-pink/10 text-pink hover:bg-pink/20 hover:border-pink/50",
+                )}
+              >
+                <X className="h-4 w-4" aria-hidden="true" />
+                {isCancelling ? "Cancelling..." : "Cancel"}
+              </button>
+            </div>
+          </>
+        )
       ) : (
         <>
           <ConfirmDialog

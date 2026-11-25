@@ -47,6 +47,8 @@ const mockMarketplace = {
   myListingsRefetch: jest.fn(),
   buyMutate: jest.fn(),
   cancelMutate: jest.fn(),
+  reclaimMutate: jest.fn(),
+  updatePriceMutate: jest.fn(),
 };
 
 jest.mock("@/hooks/useMarketplace", () => ({
@@ -69,6 +71,8 @@ jest.mock("@/hooks/useMarketplace", () => ({
   }),
   useBuyBot: () => ({ mutate: mockMarketplace.buyMutate, isPending: false }),
   useCancelListing: () => ({ mutate: mockMarketplace.cancelMutate, isPending: false }),
+  useReclaimExpired: () => ({ mutate: mockMarketplace.reclaimMutate, isPending: false }),
+  useUpdatePrice: () => ({ mutate: mockMarketplace.updatePriceMutate, isPending: false }),
   useListBot: () => ({ mutate: jest.fn(), isPending: false }),
   useMarketplaceConfig: () => ({ data: { admin: "", botNft: "", feeBps: 250, royaltyBps: 0 } }),
   useTokenDecimals: () => ({ data: 7 }),

@@ -20,6 +20,8 @@
 # Flags:
 #   --network NET   Soroban network alias (default: testnet)
 #   --identity ID   Stellar key identity to use as source (default: mykey)
+#   --royalty-bps N Creator royalty basis points for marketplace initialize
+#                   (default: $MARKETPLACE_ROYALTY_BPS / $ROYALTY_BPS or 0)
 #   --force         Re-deploy AND re-initialize every contract even if the
 #                   manifest already records them (full redeploy).
 #   --dry-run       Print every action that would be taken and exit 0 WITHOUT
@@ -38,16 +40,18 @@ FORCE=false
 DRY_RUN=false
 WASM_DIR="target/wasm32v1-none/release"
 RUST_TOOLCHAIN=""
+ROYALTY_BPS="${MARKETPLACE_ROYALTY_BPS:-${ROYALTY_BPS:-0}}"
 
 # ── Argument parsing (flags, with legacy positional network/identity fallback)
 POSITIONAL=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --network)   NETWORK="$2";   shift 2 ;;
-    --identity)  IDENTITY="$2";  shift 2 ;;
-    --wasm-dir)  WASM_DIR="$2";  shift 2 ;;
-    --force)     FORCE=true;     shift   ;;
-    --dry-run)   DRY_RUN=true;   shift   ;;
+    --network)      NETWORK="$2";      shift 2 ;;
+    --identity)     IDENTITY="$2";     shift 2 ;;
+    --wasm-dir)     WASM_DIR="$2";     shift 2 ;;
+    --royalty-bps)  ROYALTY_BPS="$2";  shift 2 ;;
+    --force)        FORCE=true;        shift   ;;
+    --dry-run)      DRY_RUN=true;      shift   ;;
     --help|-h)
       sed -n '2,30p' "${BASH_SOURCE[0]}"
       exit 0 ;;
@@ -509,7 +513,7 @@ verify_contract accrual
 
 deploy_contract marketplace
 init_contract marketplace initialize --admin "$ADMIN_ADDRESS" \
-  --bot-nft "$(resolve_id bot_nft)" --fee-bps 250 --royalty-bps 0
+  --bot-nft "$(resolve_id bot_nft)" --fee-bps 250 --royalty-bps "$ROYALTY_BPS"
 verify_contract marketplace
 
 # 3b. Wire the Accrual contract as the Token's admin so claims can mint AMT.

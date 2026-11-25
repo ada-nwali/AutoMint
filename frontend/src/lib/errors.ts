@@ -66,6 +66,10 @@ export const CONTRACT_ERROR_MESSAGES: Readonly<
     13: message("Invalid amount", "The withdrawal amount must be positive.", "Enter a valid amount."),
     14: message("Treasury balance too low", "The bot treasury does not have enough payment tokens.", "Try a smaller withdrawal."),
     15: message("Bot ID limit reached", "No further bot IDs can be allocated.", "Contact support."),
+    16: message("Tier sold out", "All bots in this tier have been minted.", "Choose another tier."),
+    17: message("Cap below supply", "The new supply cap cannot be lower than the current supply.", "Increase the cap."),
+    18: message("Approval expired", "The approval for this bot has expired.", "Request approval again."),
+    19: message("Not approved", "You are not approved to transfer this bot.", "Request approval from the owner."),
     20: message("Invalid tier rate", "The new rate must be non-zero and within the allowed adjustment range.", "Choose a rate within half or double the current rate."),
   },
   accrual: {
@@ -84,6 +88,7 @@ export const CONTRACT_ERROR_MESSAGES: Readonly<
     13: message("Mint limit update failed", "The token contract rejected the mint limit configuration.", "Review the limit and try again."),
     14: message("Bot sync failed", "The bot contract could not complete the accrual sync.", "Try again later."),
     15: message("Token admin action failed", "The token contract rejected the forwarded admin operation.", "Check the admin configuration and try again."),
+    16: message("Overlapping claim", "A claim is already in progress for this user.", "Wait for the current claim to complete."),
   },
   marketplace: {
     1: message("Already initialized", "The marketplace has already been configured.", "Refresh the page."),
@@ -119,6 +124,8 @@ export const CONTRACT_ERROR_MESSAGES: Readonly<
     31: message("Offer limit reached", "This bot already has the maximum number of open offers.", "Try again after an offer closes."),
     32: message("Invalid withdrawal amount", "The fee withdrawal amount must be positive.", "Enter a valid amount."),
     33: message("Insufficient fees", "The marketplace has not accrued enough fees for this withdrawal.", "Try a smaller amount."),
+    34: message("Active listings exist", "This bot still has active marketplace listings. Cancel all listings before changing the bot NFT contract.", "Cancel all listings."),
+    35: message("Listing not expired", "This listing has not expired yet and cannot be reclaimed.", "Wait for the listing to expire."),
   },
 };
 
