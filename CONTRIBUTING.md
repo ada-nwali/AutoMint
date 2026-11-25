@@ -7,10 +7,10 @@ Thank you for contributing to AutoMint! This codebase is built through open-sour
 ## Workflow
 
 1. **Find an Issue**: Look for unassigned issues using repository labels:
-   - **Area**: `area:contract`, `area:frontend`, `area:docs`, `area:ci`, `area:setup`
+   - **Area**: `area:contracts`, `area:frontend`, `area:docs`, `area:infra`
    - **Contract**: `contract:registry`, `contract:bot_nft`, `contract:accrual`, `contract:marketplace`, `contract:token`
    - **Type**: `type:bug`, `type:feature`, `type:security`, `type:refactor`, `type:docs`
-   - **Difficulty**: `difficulty:easy`, `difficulty:medium`, `difficulty:hard`
+   - **Difficulty**: `difficulty:medium`, `difficulty:hard`
 
 2. **Claim the Issue**: Comment `"I'll take this"` on the issue and wait for it to be assigned to you before starting work.
 

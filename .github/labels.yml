@@ -1,6 +1,10 @@
 # AutoMint GitHub Repository Labels
+#
+# This file is the single source of truth for repository labels.
+# .github/workflows/label-sync.yml creates/updates them on push. Labels are
+# never deleted by the sync; remove stale ones manually in GitHub.
 
-- name: "area:contract"
+- name: "area:contracts"
   color: "0052cc"
   description: "Issues and PRs related to Soroban smart contracts in contracts/"
 
@@ -12,13 +16,9 @@
   color: "0075ca"
   description: "Issues and PRs related to project documentation and ADRs"
 
-- name: "area:ci"
+- name: "area:infra"
   color: "5319e7"
-  description: "Issues and PRs related to GitHub Actions workflows and CI automation"
-
-- name: "area:setup"
-  color: "bfd4f2"
-  description: "Issues and PRs related to repository configuration, toolchains, or scripts"
+  description: "Issues and PRs related to CI, GitHub Actions, Docker, toolchains, or repository configuration"
 
 - name: "contract:registry"
   color: "d4c5f9"
@@ -60,10 +60,6 @@
   color: "0075ca"
   description: "Documentation updates or corrections"
 
-- name: "difficulty:easy"
-  color: "0e8a16"
-  description: "Good for first-time contributors or simple one-file fixes"
-
 - name: "difficulty:medium"
   color: "fbca04"
   description: "Requires moderate codebase understanding"
@@ -71,3 +67,15 @@
 - name: "difficulty:hard"
   color: "d93f0b"
   description: "Complex architectural or multi-contract changes"
+
+- name: "type:perf"
+  color: "f9d0c4"
+  description: "Performance improvements"
+
+- name: "type:a11y"
+  color: "c5def5"
+  description: "Accessibility improvements"
+
+- name: "type:test"
+  color: "bfdadc"
+  description: "Test coverage and test infrastructure"

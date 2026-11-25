@@ -1,7 +1,7 @@
 name: Contract & Security Concern
 description: Report a smart contract issue, security vulnerability, or invariant concern
 title: "[Security/Contract]: "
-labels: ["type:security", "area:contract"]
+labels: ["type:security", "area:contracts"]
 body:
   - type: markdown
     attributes:

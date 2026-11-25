@@ -142,11 +142,20 @@ A multi-stage `Dockerfile` is provided in `frontend/Dockerfile`.
 Build and run locally:
 ```bash
 cd frontend
-docker build -t automint-frontend .
+docker build -t automint-frontend \
+  --build-arg NEXT_PUBLIC_REGISTRY_CONTRACT_ID=<C...> \
+  --build-arg NEXT_PUBLIC_BOT_NFT_CONTRACT_ID=<C...> \
+  --build-arg NEXT_PUBLIC_ACCRUAL_CONTRACT_ID=<C...> \
+  --build-arg NEXT_PUBLIC_MARKETPLACE_CONTRACT_ID=<C...> \
+  --build-arg NEXT_PUBLIC_TOKEN_CONTRACT_ID=<C...> .
 docker run -p 3000:3000 automint-frontend
 ```
 
-Run using Docker Compose from the project root:
+> **Real contract IDs are required.** The five `NEXT_PUBLIC_*_CONTRACT_ID` values have no defaults.
+> The app validates them (StrKey checksum) at build time, so placeholder IDs make `npm run build` fail.
+> The Docker build stops early with a clear message if one is missing.
+
+Run using Docker Compose from the project root (export the five `NEXT_PUBLIC_*_CONTRACT_ID` variables or put them in a root `.env` file first; Compose refuses to start without them):
 ```bash
 docker-compose up --build
 ```

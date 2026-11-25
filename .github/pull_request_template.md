@@ -10,10 +10,10 @@ Closes #<!-- issue number -->
 
 - [ ] Bug fix (`type:bug`)
 - [ ] New feature (`type:feature`)
-- [ ] Smart contract change (`area:contract`)
+- [ ] Smart contract change (`area:contracts`)
 - [ ] Frontend enhancement (`area:frontend`)
 - [ ] Documentation update (`area:docs`)
-- [ ] Refactoring / Infrastructure (`area:ci`, `area:setup`)
+- [ ] Refactoring / Infrastructure (`area:infra`)
 
 ---
 
