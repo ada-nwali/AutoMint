@@ -1172,11 +1172,11 @@ impl BotNFTContract {
             .unwrap_or(0)
     }
 
-    /// Metadata URI for `bot_id`. The traits are derived deterministically
-    /// from sha256(bot_id, minted_at, owner); this URI exposes the
-    /// derivation inputs (id, minted_at, variant, bonus_bps, owner) as query
-    /// parameters so anyone can recompute `variant`/`bonus_bps` and confirm
-    /// rarity off-chain.
+    /// Metadata URI for `bot_id`. The traits are rolled at mint from
+    /// sha256(bot_id, minted_at, owner, host PRNG entropy) (#1338); this URI
+    /// exposes the stored values (id, minted_at, variant, bonus_bps, owner) as
+    /// query parameters. They are read back from storage and are not
+    /// recomputable from the public inputs alone.
     ///
     /// Errors: `BotNotFound`.
     pub fn token_uri(env: Env, bot_id: u64) -> Result<String, BotNFTError> {
@@ -1333,13 +1333,22 @@ impl BotNFTContract {
             .unwrap_or(0)
     }
 
-    /// Deterministic trait roll: sha256(bot_id, minted_at, owner) -> (variant, bonus_bps).
-    /// `variant` is 0..=7 and `bonus_bps` is 0..500, so rarity is verifiable
-    /// off-chain from the public inputs.
+    /// Trait roll: sha256(bot_id, minted_at, owner, prng entropy) -> (variant, bonus_bps).
+    /// `variant` is 0..=7 and `bonus_bps` is 0..500.
+    ///
+    /// The host PRNG draw is mixed in so the outcome cannot be computed from
+    /// public inputs before submission (#1338): `bot_id`, `minted_at` and the
+    /// owner are all known up front, so a hash of only those could be ground
+    /// by simulating ahead or by rotating accounts. The PRNG seed is chosen by
+    /// the host at execution time, so a simulation result does not predict the
+    /// on-chain roll. The rolled values are stored on the bot and remain
+    /// publicly readable; only the roll itself is no longer pre-computable.
     fn derive_traits(env: &Env, bot_id: u64, minted_at: u64, owner: &Address) -> (u32, u32) {
         let mut buf = Bytes::new(env);
         buf.extend_from_array(&bot_id.to_be_bytes());
         buf.extend_from_array(&minted_at.to_be_bytes());
+        let entropy: u64 = env.prng().gen();
+        buf.extend_from_array(&entropy.to_be_bytes());
         let owner_str = owner.to_string();
         let n = owner_str.len() as usize;
         let mut tmp = [0u8; 64];
@@ -1538,6 +1547,42 @@ mod test {
             deployment.token_id,
             client,
         )
+    }
+
+    // #1338: the trait roll must not be a pure function of the public inputs
+    // (bot_id, minted_at, owner), otherwise a minter can pre-compute it.
+    #[test]
+    fn test_traits_are_not_derivable_from_public_inputs() {
+        let (env, _admin, _registry, _token, client) = setup();
+        let mut mismatches = 0u32;
+        let total = 24u32;
+        for _ in 0..total {
+            let owner = Address::generate(&env);
+            let id = client.admin_mint(&owner, &BotTier::Basic);
+            let bot = client.get_bot(&id);
+            assert!(bot.variant <= 7);
+            assert!(bot.bonus_bps < 500);
+
+            // The pre-#1338 derivation, from public inputs only.
+            let mut buf = Bytes::new(&env);
+            buf.extend_from_array(&bot.id.to_be_bytes());
+            buf.extend_from_array(&bot.minted_at.to_be_bytes());
+            let owner_str = owner.to_string();
+            let n = owner_str.len() as usize;
+            let mut tmp = [0u8; 64];
+            owner_str.copy_into_slice(&mut tmp[..n]);
+            buf.append(&Bytes::from_slice(&env, &tmp[..n]));
+            let bytes: [u8; 32] = env.crypto().sha256(&buf).into();
+            let h1 = u64::from_be_bytes([
+                bytes[8], bytes[9], bytes[10], bytes[11], bytes[12], bytes[13], bytes[14],
+                bytes[15],
+            ]);
+            if (h1 % 500) as u32 != bot.bonus_bps {
+                mismatches += 1;
+            }
+        }
+        // Each bot matches by chance with probability 1/500.
+        assert!(mismatches > total / 2);
     }
 
     // #394: admin-controlled mint for airdrops (no payment).
@@ -1809,12 +1854,13 @@ mod test {
         let id2 = client.mint_tier(&user, &BotTier::Bronze);
         let id3 = client.mint_tier(&user, &BotTier::Silver);
 
-        // #395: each bot's effective rate includes its deterministic bonus.
+        // #395: each bot's effective rate includes its rarity bonus. The bonus
+        // is now PRNG-rolled (#1338) and may be 0, so only the base is a floor.
         let expected = client.get_bot(&id1).accrual_rate
             + client.get_bot(&id2).accrual_rate
             + client.get_bot(&id3).accrual_rate;
         assert_eq!(client.get_user_total_rate(&user), expected);
-        assert!(expected > 31);
+        assert!(expected >= 31);
     }
 
     #[test]

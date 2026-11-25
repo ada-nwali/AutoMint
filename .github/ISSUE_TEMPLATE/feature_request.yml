@@ -42,10 +42,9 @@ body:
       label: Target Component / Area
       options:
         - "area:frontend"
-        - "area:contract"
+        - "area:contracts"
         - "area:docs"
-        - "area:ci"
-        - "area:setup"
+        - "area:infra"
     validations:
       required: true
 
@@ -70,7 +69,6 @@ body:
       label: Estimated Difficulty
       description: If you have an estimate, select the expected implementation difficulty
       options:
-        - "difficulty:easy"
         - "difficulty:medium"
         - "difficulty:hard"
     validations:

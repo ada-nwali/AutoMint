@@ -23,7 +23,7 @@ Initialize the marketplace contract with the admin address, bot NFT contract ref
 - `fee_bps`: Platform fee in basis points (e.g., 250 = 2.5%)
 - `royalty_bps`: Creator royalty in basis points, paid to the bot's original minter
 
-`fee_bps + royalty_bps` must not exceed 10,000. Initializes `next_listing_id` to `1` and the per-seller active-listing cap to `50`. Emits `initialized` with `(admin, bot_nft, fee_bps)`.
+`fee_bps + royalty_bps` must not exceed 10,000. Initializes `next_listing_id` to `1` and the per-seller active-listing cap to `50`. Seeds the currency allowlist with the bot NFT contract's `payment_token` (emitting `currency_added`), so a fresh deployment can trade in the payment token without a separate `add_allowed_currency` call. Emits `initialized` with `(admin, bot_nft, fee_bps)`.
 
 Errors:
 - `AlreadyInitialized`: Called more than once
@@ -119,6 +119,20 @@ Admin-only: change the platform fee. The combined `new_fee_bps + royalty_bps` mu
 
 Errors:
 - `InvalidPrice`: `new_fee_bps + royalty_bps` exceeds 10,000
+- `NotInitialized`: Marketplace not initialized
+
+---
+
+### set_royalty_bps
+
+```rust
+pub fn set_royalty_bps(env: Env, new_royalty_bps: u32) -> Result<(), MarketplaceError>
+```
+
+Admin-only: change the creator royalty without a redeploy. The combined `fee_bps + new_royalty_bps` must stay within 10,000 basis points, the same rule `initialize` and `set_fee_bps` enforce. Emits `royalty_bps_upd` with `(old_royalty_bps, new_royalty_bps)`.
+
+Errors:
+- `InvalidPrice`: `fee_bps + new_royalty_bps` exceeds 10,000
 - `NotInitialized`: Marketplace not initialized
 
 ---

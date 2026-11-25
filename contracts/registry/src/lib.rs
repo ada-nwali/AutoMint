@@ -136,9 +136,9 @@ pub struct SeasonEntry {
 }
 
 // #318: authorized writer set. The accrual contract may update points/claimed
-// amounts; the bot_nft contract may update bot counts. Off by default — if the
-// writers are never configured, the gated functions remain open (backward
-// compatible) so existing callers are unaffected until an admin locks them down.
+// amounts; the bot_nft contract may update bot counts. If the writers are never
+// configured, the gated functions fail closed with `Unauthorized` (#1341) until
+// an admin calls `set_writers`.
 #[contracttype]
 pub struct Writers {
     pub accrual: Address,
@@ -559,7 +559,7 @@ impl RegistryContract {
     /// only the configured accrual contract may call `add_points` /
     /// `add_claimed_amt`, and only the configured bot_nft contract may call
     /// `increment_bot_count`. Before this is called the gated functions
-    /// remain open (backward compatible). Idempotent. Emits `writers`.
+    /// fail closed with `Unauthorized`. Idempotent. Emits `writers`.
     ///
     /// Auth: admin only.
     ///
@@ -582,30 +582,30 @@ impl RegistryContract {
     }
 
     /// The configured writer set, or `None` when writers were never
-    /// configured (in which case the gated functions stay open). Read-only.
+    /// configured (in which case the gated functions are rejected with `Unauthorized`). Read-only.
     pub fn get_writers(env: Env) -> Option<Writers> {
         env.storage().instance().get(&DataKey::Writers)
     }
 
+    /// Fail closed (#1341): when no writers are configured nobody may call the
+    /// gated functions, rather than everybody.
     fn require_accrual(env: &Env) -> Result<(), RegistryError> {
-        if let Some(writers) = env
+        let writers = env
             .storage()
             .instance()
             .get::<DataKey, Writers>(&DataKey::Writers)
-        {
-            writers.accrual.require_auth();
-        }
+            .ok_or(RegistryError::Unauthorized)?;
+        writers.accrual.require_auth();
         Ok(())
     }
 
     fn require_bot_nft(env: &Env) -> Result<(), RegistryError> {
-        if let Some(writers) = env
+        let writers = env
             .storage()
             .instance()
             .get::<DataKey, Writers>(&DataKey::Writers)
-        {
-            writers.bot_nft.require_auth();
-        }
+            .ok_or(RegistryError::Unauthorized)?;
+        writers.bot_nft.require_auth();
         Ok(())
     }
 
@@ -613,8 +613,8 @@ impl RegistryContract {
     /// totals, updating both leaderboards. Emits `addpoints`.
     ///
     /// Writer-only: once `set_writers` has been called, only the accrual
-    /// contract may invoke this; before that it stays open for backward
-    /// compatibility. `points == 0` is a no-op.
+    /// contract may invoke this; before that it fails closed with
+    /// `Unauthorized`. `points == 0` is a no-op.
     ///
     /// Errors: `NotRegistered`, `ImplausiblePoints` (above
     /// `MAX_POINTS_PER_CALL`, a sanity bound against ledger-corrupting
@@ -624,8 +624,7 @@ impl RegistryContract {
         Self::require_accrual(&env)?;
         // SECURITY NOTE: `require_accrual` enforces the writer gate when
         // `set_writers` has been called. Until that call is made the gate is
-        // fail-open for backward compatibility — lock it down by calling
-        // `set_writers` before opening the contract to production traffic.
+        // fail-closed (#1341): every call is rejected with `Unauthorized`.
         let mut profile: UserProfile = env
             .storage()
             .persistent()
@@ -709,8 +708,8 @@ impl RegistryContract {
     /// post-increment count.
     ///
     /// Writer-only: once `set_writers` has been called, only the bot_nft
-    /// contract may invoke this; before that it stays open for backward
-    /// compatibility.
+    /// contract may invoke this; before that it fails closed with
+    /// `Unauthorized`.
     ///
     /// Errors: `NotRegistered`.
     pub fn increment_bot_count(env: Env, user: Address) -> Result<(), RegistryError> {
@@ -718,8 +717,7 @@ impl RegistryContract {
         Self::require_bot_nft(&env)?;
         // SECURITY NOTE: `require_bot_nft` enforces the writer gate when
         // `set_writers` has been called. Until that call is made the gate is
-        // fail-open for backward compatibility — lock it down by calling
-        // `set_writers` before opening the contract to production traffic.
+        // fail-closed (#1341): every call is rejected with `Unauthorized`.
         let mut profile: UserProfile = env
             .storage()
             .persistent()
@@ -771,8 +769,7 @@ impl RegistryContract {
         }
         // SECURITY NOTE: `require_accrual` enforces the writer gate when
         // `set_writers` has been called. Until that call is made the gate is
-        // fail-open for backward compatibility — lock it down by calling
-        // `set_writers` before opening the contract to production traffic.
+        // fail-closed (#1341): every call is rejected with `Unauthorized`.
         let mut profile: UserProfile = env
             .storage()
             .persistent()
@@ -1411,6 +1408,41 @@ mod test {
         env.mock_auths(&[]);
         let result = client.try_add_claimed_amt(&user, &10_i128);
         assert!(result.is_err());
+    }
+
+    // #1341: with no writers configured the gated writes must fail closed,
+    // not open. Even with every auth mocked, nobody may call them.
+    #[test]
+    fn test_writer_gated_writes_fail_closed_when_writers_unset() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let id = env.register_contract(None, RegistryContract);
+        let client = RegistryContractClient::new(&env, &id);
+        client.initialize(&Address::generate(&env));
+        let user = Address::generate(&env);
+        client.register(&user, &String::from_str(&env, "Victim"));
+        assert!(client.get_writers().is_none());
+
+        assert_eq!(
+            client.try_add_points(&user, &10_u64),
+            Err(Ok(RegistryError::Unauthorized))
+        );
+        assert_eq!(
+            client.try_add_claimed_amt(&user, &10_i128),
+            Err(Ok(RegistryError::Unauthorized))
+        );
+        assert_eq!(
+            client.try_increment_bot_count(&user),
+            Err(Ok(RegistryError::Unauthorized))
+        );
+        let profile = client.get_user(&user);
+        assert_eq!(profile.total_points, 0);
+        assert_eq!(profile.bot_count, 0);
+
+        // Once the admin configures writers the gate works as before.
+        client.set_writers(&Address::generate(&env), &Address::generate(&env));
+        client.add_points(&user, &10_u64);
+        assert_eq!(client.get_user(&user).total_points, 10);
     }
 
     // #318: the configured accrual writer succeeds (same authorization check the

@@ -190,7 +190,7 @@ pub fn set_writers(env: Env, accrual: Address, bot_nft: Address) -> Result<(), R
 pub fn get_writers(env: Env) -> Option<Writers>
 ```
 
-Admin-only allowlist of contracts permitted to call `add_points` / `increment_bot_count` / `decrement_bot_count` / `add_claimed_amt` (the cross-contract writers). `set_writers` replaces both addresses in one call and emits `writers`; `get_writers` returns the current pair, or `None` before the first `set_writers`.
+Admin-only allowlist of contracts permitted to call `add_points` / `increment_bot_count` / `decrement_bot_count` / `add_claimed_amt` (the cross-contract writers). `set_writers` replaces both addresses in one call and emits `writers`; `get_writers` returns the current pair, or `None` before the first `set_writers`. The writer-gated functions fail closed: until `set_writers` has been called they return `Unauthorized` to every caller (#1341).
 
 ---
 

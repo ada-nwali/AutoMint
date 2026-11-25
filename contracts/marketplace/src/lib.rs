@@ -151,6 +151,7 @@ use soroban_sdk::{
 pub trait BotNftInterface {
     fn get_bot(env: Env, bot_id: u64) -> BotNFT;
     fn admin(env: Env) -> Address;
+    fn payment_token(env: Env) -> Address;
     fn transfer(env: Env, bot_id: u64, from: Address, to: Address);
 }
 
@@ -395,7 +396,8 @@ pub struct MarketplaceContract;
 #[contractimpl]
 impl MarketplaceContract {
     /// Set the admin and bot_nft addresses. Fails with `AlreadyInitialized` if
-    /// called twice. Validates bot_nft contract responds to admin() call.
+    /// called twice. Validates bot_nft contract responds to admin() call, and
+    /// seeds the currency allowlist with bot_nft's payment token (#1339).
     pub fn initialize(
         env: Env,
         admin: Address,
@@ -425,6 +427,22 @@ impl MarketplaceContract {
         env.storage().instance().set(&DataKey::NextListingId, &1u64);
         env.storage().instance().set(&DataKey::PageCount, &0u32);
         env.storage().instance().set(&DataKey::ListingCap, &50u32);
+
+        // #1339: seed the currency allowlist with the bot NFT's payment token
+        // so a fresh deployment can list and take offers without a separate
+        // `add_allowed_currency` step. Best-effort: a bot_nft that does not
+        // expose `payment_token` simply leaves the allowlist empty, as before.
+        if let Ok(Ok(payment_token)) = BotNFTContractClient::new(&env, &bot_nft).try_payment_token()
+        {
+            let mut allowed: Vec<Address> = Vec::new(&env);
+            allowed.push_back(payment_token.clone());
+            env.storage()
+                .instance()
+                .set(&DataKey::AllowedCurrencies, &allowed);
+            env.events()
+                .publish((Symbol::new(&env, "currency_added"),), payment_token);
+        }
+
         env.storage()
             .instance()
             .extend_ttl(LEDGER_THRESHOLD, LEDGER_BUMP);
@@ -1382,6 +1400,38 @@ impl MarketplaceContract {
         env.events().publish(
             (Symbol::new(&env, "fee_bps_upd"),),
             (old_fee_bps, new_fee_bps),
+        );
+        Ok(())
+    }
+
+    /// Change the creator royalty. The combined `fee_bps + royalty_bps` must
+    /// stay within 10,000 basis points, as enforced by `initialize` and
+    /// `set_fee_bps` (#1340). Emits `royalty_bps_upd` with
+    /// `(old_royalty_bps, new_royalty_bps)`.
+    ///
+    /// Auth: admin only.
+    ///
+    /// Errors: `NotInitialized`, `InvalidPrice` when the combined cap would
+    /// be exceeded.
+    pub fn set_royalty_bps(env: Env, new_royalty_bps: u32) -> Result<(), MarketplaceError> {
+        let mut config: Config = env
+            .storage()
+            .instance()
+            .get(&DataKey::Config)
+            .ok_or(MarketplaceError::NotInitialized)?;
+        config.admin.require_auth();
+        if (config.fee_bps as u64) + (new_royalty_bps as u64) > 10_000 {
+            return Err(MarketplaceError::InvalidPrice);
+        }
+        let old_royalty_bps = config.royalty_bps;
+        config.royalty_bps = new_royalty_bps;
+        env.storage().instance().set(&DataKey::Config, &config);
+        env.storage()
+            .instance()
+            .extend_ttl(LEDGER_THRESHOLD, LEDGER_BUMP);
+        env.events().publish(
+            (Symbol::new(&env, "royalty_bps_upd"),),
+            (old_royalty_bps, new_royalty_bps),
         );
         Ok(())
     }

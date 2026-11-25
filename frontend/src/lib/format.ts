@@ -81,7 +81,7 @@ export function stroopsToXlmString(stroops: bigint): string {
  * Listings without an expiry (`0n` / missing) never expire.
  */
 export function isListingExpired(
-  listing: { expires_at?: bigint },
+  listing: { expires_at?: bigint | undefined },
   nowSecs: number = Math.floor(Date.now() / 1000),
 ): boolean {
   const expiresAt = listing.expires_at ?? 0n;

@@ -130,6 +130,10 @@ impl DeploymentBuilder {
             &self.points_per_amt,
         );
 
+        // Registry writes fail closed until writers are configured (#1341);
+        // mirror `scripts/deploy.sh` by wiring accrual and bot_nft up front.
+        registry.set_writers(&accrual_id, &bot_nft_id);
+
         // Mirror `scripts/deploy.sh#wire_token_admin`: the accrual contract is
         // the token admin so `claim` can mint AMT (#417).
         token.set_admin(&accrual_id);

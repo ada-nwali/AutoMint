@@ -5,6 +5,7 @@ import { ErrorState } from "@/components/ui/ErrorState";
 import { useWalletStore, selectPublicKey } from "@/store/walletStore";
 import { useProfile, useBots } from "@/hooks/useAccrual";
 import { TxHistoryPanel } from "@/components/profile/TxHistoryPanel";
+import OffersSection from "@/components/dashboard/OffersSection";
 
 export default function ProfilePage() {
   const publicKey = useWalletStore(selectPublicKey);
@@ -178,6 +179,11 @@ export default function ProfilePage() {
           </div>
         </div>
       )}
+
+      {/* Offers Section */}
+      <div className="mt-8">
+        <OffersSection />
+      </div>
 
       <TxHistoryPanel account={publicKey} />
     </div>

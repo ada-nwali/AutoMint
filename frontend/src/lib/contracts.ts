@@ -14,7 +14,8 @@ import type {
   UserProfile,
   BotTier,
   MarketplaceListing,
-  MarketplaceOffer,
+  BotOffer,
+  OfferStatus,
   AccrualState,
   TierStats,
   TierInfo,
@@ -324,20 +325,40 @@ export function parseListing(rawData: Record<string, unknown>): MarketplaceListi
   };
 }
 
-export function parseOffer(rawData: Record<string, unknown>): MarketplaceOffer {
-  const status = String(rawData.status ?? "Active");
-  if (status !== "Active" && status !== "Accepted" && status !== "Cancelled") {
-    throw new Error(`parseOffer: unknown offer status ${status}`);
+function parseOfferStatus(rawStatus: unknown, _context: string): OfferStatus {
+  if (typeof rawStatus === "string") {
+    if (rawStatus === "Active" || rawStatus === "Accepted" || rawStatus === "Cancelled") {
+      return rawStatus as OfferStatus;
+    }
   }
+  if (Array.isArray(rawStatus) && rawStatus.length === 1 && typeof rawStatus[0] === "string") {
+    const candidate = rawStatus[0];
+    if (candidate === "Active" || candidate === "Accepted" || candidate === "Cancelled") {
+      return candidate as OfferStatus;
+    }
+  }
+  if (typeof rawStatus === "number" && Number.isInteger(rawStatus)) {
+    const variants: OfferStatus[] = ["Active", "Accepted", "Cancelled"];
+    if (variants[rawStatus]) {
+      return variants[rawStatus];
+    }
+  }
+  return "Active";
+}
+
+/**
+ * Parse a raw scVal map from the marketplace contract into a typed BotOffer (#1409).
+ */
+export function parseOffer(rawData: Record<string, unknown>): BotOffer {
   return {
-    id: toBigInt(rawData.id, "offer.id"),
+    id: toBigInt(rawData.id, "id"),
     buyer: String(rawData.buyer ?? ""),
-    bot_id: toBigInt(rawData.bot_id, "offer.bot_id"),
-    amount: toBigInt(rawData.amount, "offer.amount"),
+    bot_id: toBigInt(rawData.bot_id, "bot_id"),
+    amount: toBigInt(rawData.amount, "amount"),
     currency: String(rawData.currency ?? ""),
-    created_at: toBigInt(rawData.created_at, "offer.created_at"),
-    expires_at: toBigInt(rawData.expires_at, "offer.expires_at"),
-    status: status as MarketplaceOffer["status"],
+    created_at: toBigInt(rawData.created_at, "created_at"),
+    expires_at: toBigInt(rawData.expires_at, "expires_at"),
+    status: parseOfferStatus(rawData.status, "parseOffer"),
   };
 }
 
@@ -442,6 +463,65 @@ export function buildListBotArgs(
     addressToScVal(currency),
     u64ToScVal(durationSecs),
   ];
+}
+
+/**
+ * Build the argument list for the marketplace's
+ * `update_price(seller: Address, listing_id: u64, new_price: i128)` (#1406).
+ */
+export function buildUpdatePriceArgs(
+  seller: string,
+  listingId: bigint,
+  newPrice: bigint,
+): xdr.ScVal[] {
+  return [
+    addressToScVal(seller),
+    u64ToScVal(listingId),
+    i128ToScVal(newPrice),
+  ];
+}
+
+/**
+ * Build the argument list for the marketplace's
+ * `reclaim_expired(listing_id: u64)` (#1407).
+ */
+export function buildReclaimExpiredArgs(listingId: bigint): xdr.ScVal[] {
+  return [u64ToScVal(listingId)];
+}
+
+/**
+ * Build the argument list for the marketplace's
+ * `accept_offer(seller: Address, offer_id: u64)` (#1409).
+ */
+export function buildAcceptOfferArgs(seller: string, offerId: bigint): xdr.ScVal[] {
+  return [addressToScVal(seller), u64ToScVal(offerId)];
+}
+
+/**
+ * Build the argument list for the marketplace's
+ * `dismiss_offer(caller: Address, offer_id: u64)` (#1409).
+ */
+export function buildDismissOfferArgs(caller: string, offerId: bigint): xdr.ScVal[] {
+  return [addressToScVal(caller), u64ToScVal(offerId)];
+}
+
+/**
+ * Query active offers for a specific bot via `get_offers_for_bot(bot_id: u64)` (#1409).
+ */
+export async function getOffersForBot(
+  botId: bigint,
+  sourceAddress?: string,
+): Promise<BotOffer[]> {
+  const raw = await simulateContractCall<Record<string, unknown>[]>(
+    CONTRACT_ADDRESSES.marketplace,
+    "get_offers_for_bot",
+    [u64ToScVal(botId)],
+    defaultSource(sourceAddress),
+  );
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+  return raw.map((entry) => parseOffer(entry));
 }
 
 /**
@@ -860,20 +940,6 @@ export async function getUserListings(userAddress: string): Promise<MarketplaceL
     );
   }
   return listingsRaw.map((listing) => parseListing(listing));
-}
-
-/** Read the connected user's escrowed offers so they can cancel them. */
-export async function getUserOffers(userAddress: string): Promise<MarketplaceOffer[]> {
-  const offersRaw = await simulateContractCall<Record<string, unknown>[]>(
-    CONTRACT_ADDRESSES.marketplace,
-    "get_offers_for_buyer",
-    [nativeToScVal(userAddress, { type: "address" })],
-    userAddress,
-  );
-  if (!Array.isArray(offersRaw)) {
-    throw new Error(`get_offers_for_buyer returned unexpected type ${typeof offersRaw}; expected array`);
-  }
-  return offersRaw.map(parseOffer).filter((offer) => offer.status === "Active");
 }
 
 /**

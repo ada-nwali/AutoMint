@@ -54,11 +54,10 @@ body:
     attributes:
       label: Affected Area
       options:
-        - "area:contract"
+        - "area:contracts"
         - "area:frontend"
         - "area:docs"
-        - "area:ci"
-        - "area:setup"
+        - "area:infra"
     validations:
       required: true
 

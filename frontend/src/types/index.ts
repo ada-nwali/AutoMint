@@ -56,7 +56,7 @@ export interface MarketplaceListing {
   listed_at: bigint;
   active: boolean;
   /** Ledger timestamp (seconds) after which `buy_bot` rejects the listing. */
-  expires_at?: bigint;
+  expires_at?: bigint | undefined;
 }
 
 export type MarketplaceOfferStatus = "Active" | "Accepted" | "Cancelled";
@@ -73,6 +73,19 @@ export interface MarketplaceOffer {
 }
 
 export type Listing = MarketplaceListing;
+
+export type OfferStatus = "Active" | "Accepted" | "Cancelled";
+
+export interface BotOffer {
+  id: bigint;
+  buyer: string;
+  bot_id: bigint;
+  amount: bigint;
+  currency: string;
+  created_at: bigint;
+  expires_at: bigint;
+  status: OfferStatus;
+}
 
 export interface UserVault {
   user: string;

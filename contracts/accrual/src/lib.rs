@@ -2082,6 +2082,8 @@ mod auth_tests {
         );
         bot_nft.initialize(&admin, &registry_id, &token_id);
         client.initialize(&admin, &bot_nft_id, &registry_id, &token_id, &100_u64);
+        // Registry writes fail closed until writers are set (#1341).
+        reg_client.set_writers(&id, &bot_nft_id);
 
         Ctx {
             env,

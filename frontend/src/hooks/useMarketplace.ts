@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   getActiveListings,
@@ -5,6 +6,11 @@ import {
   getMarketStats,
   getMarketplaceConfig,
   buildListBotArgs,
+  buildUpdatePriceArgs,
+  buildReclaimExpiredArgs,
+  buildAcceptOfferArgs,
+  buildDismissOfferArgs,
+  getOffersForBot,
   getTokenDecimals,
   getTokenSymbol,
   getMinListingPrice,
@@ -15,11 +21,12 @@ import {
 } from "@/lib/contracts";
 import { runTxWithToasts } from "@/lib/transaction";
 import { useWalletStore, selectPublicKey } from "@/store/walletStore";
-import type { BotTier, MarketplaceListing, MarketplaceOffer } from "@/types";
+import type { BotTier, MarketplaceListing, MarketplaceOffer, BotOffer } from "@/types";
 import { pollWhenVisible } from "@/lib/polling";
 import { STALE_TIME, GC_TIME, qk } from "@/lib/queryKeys";
 import { trackStatus, newTxId } from "@/components/ui/TxStatus";
 import type { DashboardData } from "./useAccrual";
+import { useBots } from "./useAccrual";
 import { toastContractError } from "@/lib/errors";
 import { CONTRACT_ADDRESSES } from "@/lib/constants";
 import { addressToScVal, u64ToScVal } from "@/lib/stellar";
@@ -449,5 +456,254 @@ export function useTokenSymbol(contractId: string | undefined) {
     enabled: Boolean(contractId),
     staleTime: STALE_TIME.STATIC,
     gcTime: GC_TIME.LONG,
+  });
+}
+
+/**
+ * Update the price of an active listing via `update_price` (#1406).
+ */
+export function useUpdatePrice() {
+  const queryClient = useQueryClient();
+  const publicKey = useWalletStore(selectPublicKey);
+
+  return useMutation({
+    mutationFn: async ({
+      listingId,
+      newPrice,
+    }: {
+      listingId: bigint;
+      newPrice: bigint;
+    }) => {
+      if (!publicKey) throw new Error("Wallet not connected");
+
+      const txId = newTxId("update_price");
+      const status = await runTxWithToasts({
+        contractId: CONTRACT_ADDRESSES.marketplace,
+        method: "update_price",
+        args: buildUpdatePriceArgs(publicKey, listingId, newPrice),
+        sourceAddress: publicKey,
+        id: "update_price",
+        label: "price update",
+        successMessage: "Listing price updated successfully!",
+      });
+      trackStatus(txId, "Price Update", status);
+      return status;
+    },
+    onMutate: async ({ listingId, newPrice }) => {
+      await queryClient.cancelQueries({ queryKey: qk.listings() });
+      await queryClient.cancelQueries({ queryKey: qk.myListings(publicKey) });
+      const previousListings = queryClient.getQueryData(qk.listings());
+      const previousMyListings = queryClient.getQueryData(qk.myListings(publicKey));
+
+      const update = (old: MarketplaceListing[] | undefined) =>
+        old ? old.map((l) => (l.id === listingId ? { ...l, price: newPrice } : l)) : old;
+
+      queryClient.setQueryData(qk.listings(), update);
+      queryClient.setQueryData(qk.myListings(publicKey), update);
+
+      return { previousListings, previousMyListings };
+    },
+    onError: (
+      error: Error,
+      _variables,
+      context: { previousListings: unknown; previousMyListings: unknown } | undefined,
+    ) => {
+      if (context) {
+        queryClient.setQueryData(qk.listings(), context.previousListings);
+        queryClient.setQueryData(qk.myListings(publicKey), context.previousMyListings);
+      }
+      toastContractError(error, "marketplace");
+      console.error("Price update failed:", error);
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: qk.listings() });
+      queryClient.invalidateQueries({ queryKey: qk.myListings(publicKey) });
+    },
+  });
+}
+
+/**
+ * Reclaim an expired listing's escrowed bot via `reclaim_expired` (#1407).
+ */
+export function useReclaimExpired() {
+  const queryClient = useQueryClient();
+  const publicKey = useWalletStore(selectPublicKey);
+
+  return useMutation({
+    mutationFn: async (listingId: bigint) => {
+      if (!publicKey) throw new Error("Wallet not connected");
+
+      const txId = newTxId("reclaim_expired");
+      const status = await runTxWithToasts({
+        contractId: CONTRACT_ADDRESSES.marketplace,
+        method: "reclaim_expired",
+        args: buildReclaimExpiredArgs(listingId),
+        sourceAddress: publicKey,
+        id: "reclaim_expired",
+        label: "reclaim",
+        successMessage: "Bot reclaimed successfully!",
+      });
+      trackStatus(txId, "Reclaim", status);
+      return status;
+    },
+    onMutate: async (listingId: bigint) => {
+      await queryClient.cancelQueries({ queryKey: qk.listings() });
+      await queryClient.cancelQueries({ queryKey: qk.myListings(publicKey) });
+      const previousListings = queryClient.getQueryData(qk.listings());
+      const previousMyListings = queryClient.getQueryData(qk.myListings(publicKey));
+
+      const without = (old: MarketplaceListing[] | undefined) =>
+        old ? old.filter((l) => l.id !== listingId) : old;
+
+      queryClient.setQueryData(qk.listings(), without);
+      queryClient.setQueryData(qk.myListings(publicKey), without);
+
+      return { previousListings, previousMyListings };
+    },
+    onError: (
+      error: Error,
+      _variables: bigint,
+      context: { previousListings: unknown; previousMyListings: unknown } | undefined,
+    ) => {
+      if (context) {
+        queryClient.setQueryData(qk.listings(), context.previousListings);
+        queryClient.setQueryData(qk.myListings(publicKey), context.previousMyListings);
+      }
+      toastContractError(error, "marketplace");
+      console.error("Listing reclaim failed:", error);
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: qk.listings() });
+      queryClient.invalidateQueries({ queryKey: qk.myListings(publicKey) });
+      queryClient.invalidateQueries({ queryKey: qk.bots(publicKey) });
+      queryClient.invalidateQueries({ queryKey: qk.dashboard(publicKey) });
+      queryClient.invalidateQueries({ queryKey: ["botDetails"] });
+      queryClient.invalidateQueries({ queryKey: qk.accrualState(publicKey) });
+    },
+  });
+}
+
+/**
+ * Fetch open offers for a single bot (#1409).
+ */
+export function useBotOffers(botId: bigint | undefined) {
+  const publicKey = useWalletStore(selectPublicKey);
+
+  return useQuery<BotOffer[]>({
+    queryKey: qk.botOffers(botId ?? 0n),
+    queryFn: () =>
+      botId !== undefined ? getOffersForBot(botId, publicKey ?? undefined) : Promise.resolve([]),
+    enabled: botId !== undefined,
+    refetchInterval: pollWhenVisible(),
+    staleTime: STALE_TIME.SHORT,
+    gcTime: GC_TIME.SHORT,
+  });
+}
+
+/**
+ * Aggregate incoming active offers across all bots owned or listed by the connected user (#1409).
+ */
+export function useIncomingOffers() {
+  const publicKey = useWalletStore(selectPublicKey);
+  const { data: ownBotIds = [] } = useBots();
+  const { data: myListings = [] } = useMyListings();
+
+  const botIds = useMemo(() => {
+    const ids = new Set<bigint>();
+    ownBotIds.forEach((id) => ids.add(id));
+    myListings.forEach((listing) => ids.add(listing.bot_id));
+    return Array.from(ids);
+  }, [ownBotIds, myListings]);
+
+  return useQuery<BotOffer[]>({
+    queryKey: qk.incomingOffers(publicKey),
+    queryFn: async () => {
+      if (!publicKey || botIds.length === 0) return [];
+      const offersNested = await Promise.all(
+        botIds.map((botId) => getOffersForBot(botId, publicKey)),
+      );
+      const allOffers = offersNested.flat().filter((offer) => offer.status === "Active");
+      return allOffers.sort((a, b) => Number(b.created_at - a.created_at));
+    },
+    enabled: !!publicKey && botIds.length > 0,
+    refetchInterval: pollWhenVisible(),
+    staleTime: STALE_TIME.SHORT,
+    gcTime: GC_TIME.SHORT,
+  });
+}
+
+/**
+ * Accept an incoming offer on a bot via `accept_offer` (#1409).
+ */
+export function useAcceptOffer() {
+  const queryClient = useQueryClient();
+  const publicKey = useWalletStore(selectPublicKey);
+
+  return useMutation({
+    mutationFn: async (offerId: bigint) => {
+      if (!publicKey) throw new Error("Wallet not connected");
+
+      const txId = newTxId("accept_offer");
+      const status = await runTxWithToasts({
+        contractId: CONTRACT_ADDRESSES.marketplace,
+        method: "accept_offer",
+        args: buildAcceptOfferArgs(publicKey, offerId),
+        sourceAddress: publicKey,
+        id: "accept_offer",
+        label: "accept offer",
+        successMessage: "Offer accepted successfully!",
+      });
+      trackStatus(txId, "Accept Offer", status);
+      return status;
+    },
+    onError: (error: Error) => {
+      toastContractError(error, "marketplace");
+      console.error("Accept offer failed:", error);
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ["incomingOffers"] });
+      queryClient.invalidateQueries({ queryKey: ["botOffers"] });
+      queryClient.invalidateQueries({ queryKey: qk.bots(publicKey) });
+      queryClient.invalidateQueries({ queryKey: qk.myListings(publicKey) });
+      queryClient.invalidateQueries({ queryKey: qk.listings() });
+      queryClient.invalidateQueries({ queryKey: qk.dashboard(publicKey) });
+      queryClient.invalidateQueries({ queryKey: ["botDetails"] });
+      queryClient.invalidateQueries({ queryKey: qk.accrualState(publicKey) });
+    },
+  });
+}
+
+/**
+ * Decline/dismiss an incoming offer on a bot via `dismiss_offer` (#1409).
+ */
+export function useDeclineOffer() {
+  const queryClient = useQueryClient();
+  const publicKey = useWalletStore(selectPublicKey);
+
+  return useMutation({
+    mutationFn: async (offerId: bigint) => {
+      if (!publicKey) throw new Error("Wallet not connected");
+
+      const txId = newTxId("dismiss_offer");
+      const status = await runTxWithToasts({
+        contractId: CONTRACT_ADDRESSES.marketplace,
+        method: "dismiss_offer",
+        args: buildDismissOfferArgs(publicKey, offerId),
+        sourceAddress: publicKey,
+        id: "dismiss_offer",
+        label: "decline offer",
+        successMessage: "Offer declined and dismissed.",
+      });
+      trackStatus(txId, "Decline Offer", status);
+      return status;
+    },
+    onError: (error: Error) => {
+      toastContractError(error, "marketplace");
+      console.error("Decline offer failed:", error);
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ["incomingOffers"] });
+      queryClient.invalidateQueries({ queryKey: ["botOffers"] });
+    },
   });
 }

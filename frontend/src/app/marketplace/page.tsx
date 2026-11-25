@@ -11,6 +11,8 @@ import {
   useCancelListing,
   useMyOffers,
   useCancelOffer,
+  useReclaimExpired,
+  useUpdatePrice,
 } from "@/hooks/useMarketplace";
 import { useAllBotDetails } from "@/hooks/useBotDetails";
 import { useBots } from "@/hooks/useAccrual";
@@ -72,6 +74,7 @@ export default function MarketplacePage() {
   const [buyingId, setBuyingId] = useState<bigint | null>(null);
   const [cancellingId, setCancellingId] = useState<bigint | null>(null);
   const [cancellingOfferId, setCancellingOfferId] = useState<bigint | null>(null);
+  const [reclaimingId, setReclaimingId] = useState<bigint | null>(null);
 
   const {
     data: allListings,
@@ -128,6 +131,8 @@ export default function MarketplacePage() {
   const cancel = useCancelListing();
   const { data: myOffers = [] } = useMyOffers();
   const cancelOffer = useCancelOffer();
+  const reclaim = useReclaimExpired();
+  const updatePrice = useUpdatePrice();
 
   const sourceListings = tab === "mine" ? myListings : allListings;
 
@@ -172,6 +177,15 @@ export default function MarketplacePage() {
   const handleCancelOffer = (offerId: bigint) => {
     setCancellingOfferId(offerId);
     cancelOffer.mutate(offerId, { onSettled: () => setCancellingOfferId(null) });
+  };
+
+  const handleReclaim = (listingId: bigint) => {
+    setReclaimingId(listingId);
+    reclaim.mutate(listingId, { onSettled: () => setReclaimingId(null) });
+  };
+
+  const handleUpdatePrice = (listingId: bigint, newPrice: bigint) => {
+    updatePrice.mutate({ listingId, newPrice });
   };
 
   const handleListForSale = (botId: bigint) => {
@@ -311,8 +325,11 @@ export default function MarketplacePage() {
               connectedAddress={publicKey}
               onBuy={handleBuy}
               onCancel={handleCancel}
+              onReclaim={handleReclaim}
+              onUpdatePrice={handleUpdatePrice}
               isBuying={buyingId === listing.id}
               isCancelling={cancellingId === listing.id}
+              isReclaiming={reclaimingId === listing.id}
               isBuyPaused={buyPaused}
             />
           );

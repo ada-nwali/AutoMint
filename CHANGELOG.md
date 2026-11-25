@@ -9,7 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - testnet-implementation
 
+### Security
+- **Bot rarity roll no longer grindable** (#1338): `derive_traits` mixes a host PRNG draw into the hash, so `variant` / `bonus_bps` cannot be pre-computed from `bot_id`, `minted_at` and the owner before submitting.
+- **Registry writes fail closed** (#1341): `add_points`, `add_claimed_amt` and `increment_bot_count` return `Unauthorized` until an admin calls `set_writers`; `scripts/deploy.sh` now runs `set_writers` as a one-time configuration step.
+
 ### Added
+- **Marketplace `set_royalty_bps`** (#1340): admin setter for the creator royalty with the same `fee + royalty <= 10_000` check as `set_fee_bps`; emits `royalty_bps_upd`.
+- **Marketplace allowlist seeded at initialize** (#1339): `initialize` adds the bot NFT's payment token to the currency allowlist, so a fresh deployment accepts listings and offers immediately.
 - **Registry observability, seasons, and display names** (#370–#373, see [`docs/adr/0007-registry-observability-seasons-display-names.md`](docs/adr/0007-registry-observability-seasons-display-names.md)):
   - **Complete registry events** (#370): every state-changing registry entry point now publishes exactly one event — `init`, `register`, `writers`, `addpoints`, `inc_bot`, `dec_bot`, `claimed`, `newseason`, `set_admin`, `adm_acpt`, `adm_cncl`. Zero-amount/zero-point calls are silent no-ops. Indexer `EVENT_NAMES`, `indexer/docs/EVENTS.md`, and the decode tests cover all eleven.
   - **Season leaderboards** (#371): admin-only `start_new_season` rolls a season counter and starts a fresh bounded board; `get_season` and `get_leaderboard_for_season(season, limit)` expose the counter and per-season top-N `SeasonEntry` rows (`display_name`, `season_points`, lifetime `total_points`) while all-time rankings and completed seasons stay intact. The frontend leaderboard page gains an All-time / Season toggle.

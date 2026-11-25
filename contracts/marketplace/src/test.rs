@@ -2032,6 +2032,80 @@ fn set_bot_nft_succeeds_once_every_listing_has_settled() {
 // ── #911: combined fee + royalty cap on set_fee_bps ──────────────────────
 
 #[test]
+fn set_royalty_bps_enforces_the_combined_fee_and_royalty_cap() {
+    let h = setup();
+    h.env.mock_all_auths();
+
+    let mkt_id = h.env.register_contract(None, MarketplaceContract);
+    let mkt = MarketplaceContractClient::new(&h.env, &mkt_id);
+    mkt.initialize(&h.admin, &h.bot.address, &250u32, &0u32);
+
+    mkt.set_royalty_bps(&500u32);
+    assert_eq!(mkt.config().royalty_bps, 500);
+    assert_eq!(mkt.config().fee_bps, 250, "fee must be untouched");
+
+    // Fee and royalty together may use the whole 10,000 bps and no more.
+    mkt.set_royalty_bps(&9_750u32);
+    assert_eq!(
+        mkt.try_set_royalty_bps(&9_751u32),
+        Err(Ok(MarketplaceError::InvalidPrice))
+    );
+    assert_eq!(
+        mkt.config().royalty_bps,
+        9_750,
+        "a rejected royalty update must leave the royalty unchanged"
+    );
+}
+
+#[test]
+fn set_royalty_bps_emits_an_event_with_old_and_new_values() {
+    let h = setup();
+    h.env.mock_all_auths();
+    h.mkt.set_royalty_bps(&300u32);
+
+    let events = h.env.events().all();
+    let (_, topics, data) = events.last().unwrap();
+    let topic: Symbol = Symbol::try_from_val(&h.env, &topics.get(0).unwrap()).unwrap();
+    assert_eq!(topic, Symbol::new(&h.env, "royalty_bps_upd"));
+    let (old, new): (u32, u32) = <(u32, u32)>::try_from_val(&h.env, &data).unwrap();
+    assert_eq!((old, new), (0, 300));
+}
+
+#[test]
+fn set_royalty_bps_requires_admin_auth() {
+    let h = setup();
+    h.env.mock_auths(&[]);
+    assert!(h.mkt.try_set_royalty_bps(&100u32).is_err());
+    assert_eq!(h.mkt.config().royalty_bps, 0);
+}
+
+#[test]
+fn initialize_seeds_the_allowlist_with_the_bot_nft_payment_token() {
+    // A fresh marketplace must accept the payment token without any
+    // `add_allowed_currency` call (#1339).
+    let deployment = deploy_all(Env::default());
+    let env = deployment.env.clone();
+    let mkt_id = env.register_contract(None, MarketplaceContract);
+    let mkt = MarketplaceContractClient::new(&env, &mkt_id);
+    mkt.initialize(&deployment.admin, &deployment.bot_nft_id, &250u32, &0u32);
+
+    assert!(mkt.is_allowed_currency(&deployment.token_id));
+    assert!(!mkt.is_allowed_currency(&Address::generate(&env)));
+
+    let seller = Address::generate(&env);
+    let bot = BotNFTContractClient::new(&env, &deployment.bot_nft_id);
+    let bot_id = bot.mint_basic(&seller);
+    let listing = mkt.list_bot(
+        &seller,
+        &bot_id,
+        &1_000_i128,
+        &deployment.token_id,
+        &604_800_u64,
+    );
+    assert_eq!(listing, 1);
+}
+
+#[test]
 fn set_fee_bps_enforces_the_combined_fee_and_royalty_cap() {
     let h = setup();
     h.env.mock_all_auths();
