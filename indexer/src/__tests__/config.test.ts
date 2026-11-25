@@ -7,11 +7,21 @@ import {
   loadContractConfig,
   assertCompleteConfig,
   isContractAddress,
+  parseDotEnvLocal,
   type LoadedConfig,
 } from "../config.js";
 import { CREG, CBOT, CACC, CMAR, CTOK } from "./helpers.js";
 
 describe("loadContractConfig", () => {
+  it("accepts export assignments and strips inline comments from dotenv values (#1243)", () => {
+    expect(
+      parseDotEnvLocal(`export NEXT_PUBLIC_REGISTRY_CONTRACT_ID=CABC # testnet\nNEXT_PUBLIC_TOKEN_CONTRACT_ID='CDEF # kept'`),
+    ).toEqual({
+      NEXT_PUBLIC_REGISTRY_CONTRACT_ID: "CABC",
+      NEXT_PUBLIC_TOKEN_CONTRACT_ID: "CDEF # kept",
+    });
+  });
+
   it("reads contract ids from a deployment manifest (deploy.sh format)", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "am-config-"));
     const manifest = path.join(dir, "testnet.json");

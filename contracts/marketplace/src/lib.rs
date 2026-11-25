@@ -223,6 +223,8 @@ pub enum DataKey {
     Offer(u64),
     /// Open offer ids for a bot, oldest first (persistent) (#425).
     BotOffers(u64),
+    /// Open offer ids for a buyer, oldest first (persistent) (#1410).
+    BuyerOffers(Address),
     /// Next offer id to assign (instance) (#425).
     NextOfferId,
     /// Platform fees accrued per currency and not yet withdrawn (persistent) (#426).
@@ -1744,6 +1746,9 @@ impl MarketplaceContract {
         Self::write_offer(env, &offer);
         bot_offers.push_back(offer_id);
         Self::write_bot_offers(env, bot_id, &bot_offers);
+        let mut buyer_offers = Self::read_buyer_offers(env, &buyer);
+        buyer_offers.push_back(offer_id);
+        Self::write_buyer_offers(env, &buyer, &buyer_offers);
         env.storage()
             .instance()
             .set(&DataKey::NextOfferId, &next_offer_id);
@@ -1869,6 +1874,7 @@ impl MarketplaceContract {
         offer.status = OfferStatus::Accepted;
         Self::write_offer(env, &offer);
         Self::remove_bot_offer(env, offer.bot_id, offer_id);
+        Self::remove_buyer_offer(env, &offer.buyer, offer_id);
         Self::record_sale(env, bot.tier, offer.amount)?;
         Self::add_user_purchase(
             env,
@@ -1993,6 +1999,22 @@ impl MarketplaceContract {
         out
     }
 
+    /// Every open (`Active`) offer made by `buyer`, oldest first (#1410).
+    pub fn get_offers_for_buyer(env: Env, buyer: Address) -> Vec<Offer> {
+        let ids = Self::read_buyer_offers(&env, &buyer);
+        let mut out: Vec<Offer> = Vec::new(&env);
+        for id in ids.iter() {
+            if let Some(offer) = env
+                .storage()
+                .persistent()
+                .get::<_, Offer>(&DataKey::Offer(id))
+            {
+                out.push_back(offer);
+            }
+        }
+        out
+    }
+
     // ---------------------------------------------------------------------
     // Fee withdrawal (#426)
     // ---------------------------------------------------------------------
@@ -2060,6 +2082,7 @@ impl MarketplaceContract {
         offer.status = OfferStatus::Cancelled;
         Self::write_offer(env, offer);
         Self::remove_bot_offer(env, offer.bot_id, offer.id);
+        Self::remove_buyer_offer(env, &offer.buyer, offer.id);
         Ok(())
     }
 
@@ -2171,6 +2194,36 @@ impl MarketplaceContract {
             }
         }
         Self::write_bot_offers(env, bot_id, &kept);
+    }
+
+    fn read_buyer_offers(env: &Env, buyer: &Address) -> Vec<u64> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::BuyerOffers(buyer.clone()))
+            .unwrap_or_else(|| Vec::new(env))
+    }
+
+    fn write_buyer_offers(env: &Env, buyer: &Address, ids: &Vec<u64>) {
+        let key = DataKey::BuyerOffers(buyer.clone());
+        if ids.is_empty() {
+            env.storage().persistent().remove(&key);
+            return;
+        }
+        env.storage().persistent().set(&key, ids);
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, LEDGER_THRESHOLD, LEDGER_BUMP);
+    }
+
+    fn remove_buyer_offer(env: &Env, buyer: &Address, offer_id: u64) {
+        let ids = Self::read_buyer_offers(env, buyer);
+        let mut kept: Vec<u64> = Vec::new(env);
+        for id in ids.iter() {
+            if id != offer_id {
+                kept.push_back(id);
+            }
+        }
+        Self::write_buyer_offers(env, buyer, &kept);
     }
 
     fn require_not_paused(env: &Env) -> Result<(), MarketplaceError> {

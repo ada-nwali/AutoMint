@@ -14,13 +14,14 @@ import {
   getTokenDecimals,
   getTokenSymbol,
   getMinListingPrice,
+  getUserOffers,
   getTierRemaining,
   buildMintTierArgs,
   buildTransferBotArgs,
 } from "@/lib/contracts";
 import { runTxWithToasts } from "@/lib/transaction";
 import { useWalletStore, selectPublicKey } from "@/store/walletStore";
-import type { BotTier, MarketplaceListing, BotOffer } from "@/types";
+import type { BotTier, MarketplaceListing, MarketplaceOffer, BotOffer } from "@/types";
 import { pollWhenVisible } from "@/lib/polling";
 import { STALE_TIME, GC_TIME, qk } from "@/lib/queryKeys";
 import { trackStatus, newTxId } from "@/components/ui/TxStatus";
@@ -264,6 +265,52 @@ export function useMyListings() {
     refetchInterval: pollWhenVisible(),
     staleTime: STALE_TIME.SHORT,
     gcTime: GC_TIME.SHORT,
+  });
+}
+
+export function useMyOffers() {
+  const publicKey = useWalletStore(selectPublicKey);
+  return useQuery({
+    queryKey: ["marketplace", "offers", publicKey],
+    queryFn: () => (publicKey ? getUserOffers(publicKey) : Promise.resolve([])),
+    enabled: Boolean(publicKey),
+    refetchInterval: pollWhenVisible(),
+    staleTime: STALE_TIME.SHORT,
+    gcTime: GC_TIME.SHORT,
+  });
+}
+
+export function useCancelOffer() {
+  const queryClient = useQueryClient();
+  const publicKey = useWalletStore(selectPublicKey);
+  return useMutation({
+    mutationFn: async (offerId: bigint) => {
+      if (!publicKey) throw new Error("Wallet not connected");
+      const txId = newTxId("cancel_offer");
+      const status = await runTxWithToasts({
+        contractId: CONTRACT_ADDRESSES.marketplace,
+        method: "cancel_offer",
+        args: [addressToScVal(publicKey), u64ToScVal(offerId)],
+        sourceAddress: publicKey,
+        id: "cancel_offer",
+        label: "offer cancellation",
+        successMessage: "Offer cancelled and refunded!",
+      });
+      trackStatus(txId, "Offer cancellation", status);
+      return status;
+    },
+    onMutate: async (offerId: bigint) => {
+      const key = ["marketplace", "offers", publicKey];
+      await queryClient.cancelQueries({ queryKey: key });
+      const previous = queryClient.getQueryData<MarketplaceOffer[]>(key);
+      queryClient.setQueryData<MarketplaceOffer[]>(key, (offers = []) => offers.filter((offer) => offer.id !== offerId));
+      return { previous, key };
+    },
+    onError: (error: Error, _offerId, context) => {
+      if (context) queryClient.setQueryData(context.key, context.previous);
+      toastContractError(error, "marketplace");
+    },
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ["marketplace", "offers", publicKey] }),
   });
 }
 

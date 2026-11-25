@@ -86,8 +86,15 @@ export interface IndexerRuntime {
   extraHealth: () => Record<string, unknown>;
 }
 
+export interface RuntimeOptions {
+  dbPath?: string;
+  rpcUrl?: string;
+  startLedger?: number;
+  pollIntervalMs?: number;
+}
+
 export function buildRuntime(
-  opts: { dbPath?: string; rpcUrl?: string; startLedger?: number } = {},
+  opts: RuntimeOptions = {},
 ): IndexerRuntime {
   const loaded = loadContractConfig();
   assertCompleteConfig(loaded);
@@ -114,9 +121,9 @@ export function buildRuntime(
     defaultStartLedger: startLedger,
   });
 
-  const pollIntervalMs = Number(
-    process.env.AM_POLL_INTERVAL_MS ?? DEFAULT_POLL_INTERVAL_MS,
-  );
+  const pollIntervalMs =
+    opts.pollIntervalMs ??
+    validatePositiveInt(process.env.AM_POLL_INTERVAL_MS, "AM_POLL_INTERVAL_MS", DEFAULT_POLL_INTERVAL_MS);
   const staleAfterMs = Math.max(pollIntervalMs * 3, 30_000);
 
   return {
@@ -128,10 +135,9 @@ export function buildRuntime(
 }
 
 export async function main(): Promise<void> {
-  const { db, poller, config, extraHealth } = buildRuntime();
-
   const port = validatePositiveInt(process.env.AM_PORT, "AM_PORT", DEFAULT_PORT);
   const intervalMs = validatePositiveInt(process.env.AM_POLL_INTERVAL_MS, "AM_POLL_INTERVAL_MS", DEFAULT_POLL_INTERVAL_MS);
+  const { db, poller, config, extraHealth } = buildRuntime({ pollIntervalMs: intervalMs });
 
   // A signal only aborts the poller. `poller.run` settles once its in-flight
   // cycle has stopped, then the HTTP server drains and the database is closed

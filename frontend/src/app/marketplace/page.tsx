@@ -9,6 +9,8 @@ import {
   useMyListings,
   useBuyBot,
   useCancelListing,
+  useMyOffers,
+  useCancelOffer,
   useReclaimExpired,
   useUpdatePrice,
 } from "@/hooks/useMarketplace";
@@ -71,6 +73,7 @@ export default function MarketplacePage() {
   const [sendingBot, setSendingBot] = useState<BotNFT | null>(null);
   const [buyingId, setBuyingId] = useState<bigint | null>(null);
   const [cancellingId, setCancellingId] = useState<bigint | null>(null);
+  const [cancellingOfferId, setCancellingOfferId] = useState<bigint | null>(null);
   const [reclaimingId, setReclaimingId] = useState<bigint | null>(null);
 
   const {
@@ -126,6 +129,8 @@ export default function MarketplacePage() {
   const buy = useBuyBot();
   const { buyPaused } = usePauseStatus();
   const cancel = useCancelListing();
+  const { data: myOffers = [] } = useMyOffers();
+  const cancelOffer = useCancelOffer();
   const reclaim = useReclaimExpired();
   const updatePrice = useUpdatePrice();
 
@@ -167,6 +172,11 @@ export default function MarketplacePage() {
   const handleCancel = (listingId: bigint) => {
     setCancellingId(listingId);
     cancel.mutate(listingId, { onSettled: () => setCancellingId(null) });
+  };
+
+  const handleCancelOffer = (offerId: bigint) => {
+    setCancellingOfferId(offerId);
+    cancelOffer.mutate(offerId, { onSettled: () => setCancellingOfferId(null) });
   };
 
   const handleReclaim = (listingId: bigint) => {
@@ -507,6 +517,35 @@ export default function MarketplacePage() {
                       />
                     );
                   })}
+                </div>
+              )}
+
+              <h2 className="mb-3 mt-10 font-display text-base font-semibold text-text">
+                Your Open Offers
+              </h2>
+              {myOffers.length === 0 ? (
+                <div className="rounded-2xl border border-liner bg-card px-6 py-8 text-center text-sm text-muted">
+                  You have no open offers. Offers you make on bots will appear here until accepted or cancelled.
+                </div>
+              ) : (
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3" data-testid="marketplace-my-offers">
+                  {myOffers.map((offer) => (
+                    <div key={offer.id.toString()} className="rounded-2xl border border-liner bg-card p-4">
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm font-semibold text-text">Bot #{offer.bot_id.toString()}</span>
+                        <span className="text-xs text-muted">Offer #{offer.id.toString()}</span>
+                      </div>
+                      <p className="mt-2 text-sm text-muted">Escrowed amount: {offer.amount.toString()}</p>
+                      <button
+                        type="button"
+                        onClick={() => handleCancelOffer(offer.id)}
+                        disabled={cancellingOfferId === offer.id}
+                        className="mt-4 w-full rounded-xl border border-pink/30 bg-pink/10 px-4 py-2 text-sm font-medium text-pink hover:bg-pink/20 disabled:opacity-50"
+                      >
+                        {cancellingOfferId === offer.id ? "Cancelling..." : "Cancel offer and refund"}
+                      </button>
+                    </div>
+                  ))}
                 </div>
               )}
             </>
